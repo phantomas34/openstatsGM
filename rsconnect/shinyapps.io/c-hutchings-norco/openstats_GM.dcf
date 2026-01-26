@@ -5,7 +5,7 @@ account: c-hutchings-norco
 server: shinyapps.io
 hostUrl: https://api.shinyapps.io/v1
 appId: 15427320
-bundleId: 11073226
+bundleId: 11111238
 url: https://c-hutchings-norco.shinyapps.io/openstats_GM/
 version: 1
 asMultiple: FALSE

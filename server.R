@@ -1,4 +1,4 @@
-# server.R (Corrected Version - Replace your entire file with this)
+# server.R (Complete Corrected Version for Height Bug)
 
 server <- function(input, output, session) {
   
@@ -25,9 +25,9 @@ server <- function(input, output, session) {
     df <- NULL
     tryCatch({
       if (file_ext == "csv") {
-        df <- read.csv(input$file_upload$datapath, stringsAsFactors = FALSE)
+        df <- read.csv(input$file_upload$datapath, stringsAsFactors = FALSE, na.strings=c("","NA"))
       } else if (file_ext == "xlsx") {
-        df <- readxl::read_excel(input$file_upload$datapath)
+        df <- readxl::read_excel(input$file_upload$datapath, na=c("","NA"))
       } else {
         showNotification("Unsupported file type. Please upload a .csv or .xlsx file.", type = "error")
       }
@@ -241,7 +241,7 @@ server <- function(input, output, session) {
       output$select_regression_dv <- renderUI({ selectInput("regression_dv", "Dependent Variable (Numeric)", choices = c("", numeric_cols)) })
       output$select_regression_iv <- renderUI({ selectInput("regression_iv", "Independent Variable(s) (Numeric)", choices = numeric_cols, multiple = TRUE) })
       output$select_correlation_vars <- renderUI({ selectInput("correlation_vars", "Select Variables for Correlation (Numeric)", choices = numeric_cols, multiple = TRUE) })
-      # --- Additions for Logistic Regression ---
+      # Additions for Logistic Regression
       output$select_logistic_dv <- renderUI({ selectInput("logistic_dv", "Dependent Variable (Binary/Categorical):", choices = c("", all_cols)) })
       output$select_logistic_iv <- renderUI({ selectInput("logistic_iv", "Independent Variable(s):", choices = all_cols, multiple = TRUE) })
     } else {
@@ -329,38 +329,37 @@ server <- function(input, output, session) {
   })
   
   
-  # --- Descriptive Statistics Logic ---
-  
+  # --- START: ROBUST REPLACEMENT for Descriptive Statistics Logic ---
   observeEvent(input$analyze_descriptive, {
-    df <- data_r()
     
-    # --- UPGRADED REPLACEMENT for output$summary_stats_output ---
+    # --- Summary Statistics Table ---
     output$summary_stats_output <- renderDT({
-      req(data_r(), input$descriptive_variable)
       df <- data_r()
+      req(df, input$descriptive_variable, input$descriptive_variable %in% names(df))
+      
       var_name <- input$descriptive_variable
-      group_var <- input$ht_group_variabl
+      group_var <- input$group_by_variable
       
-      if (var_name == "") return(NULL) 
+      if (var_name == "") return(NULL)
       
+      # Use a strict definition for categorical for this specific output
+      is_strictly_categorical <- is.character(df[[var_name]]) || is.factor(df[[var_name]])
+      
+      # Use the smarter "categorical-like" definition for grouping variables
       is_categorical_like <- function(vec) {
-        is.character(vec) || is.factor(vec) || 
-          (is.numeric(vec) && length(unique(na.omit(vec))) < 15)
+        is.character(vec) || is.factor(vec) || (is.numeric(vec) && length(unique(na.omit(vec))) < 15)
       }
       
       if (group_var != "None" && group_var %in% names(df)) {
-        var_is_cat <- is_categorical_like(df[[var_name]])
-        group_is_cat <- is_categorical_like(df[[group_var]])
+        group_is_cat_like <- is_categorical_like(df[[group_var]])
         
-        if (var_is_cat && group_is_cat) {
+        if (is_strictly_categorical && group_is_cat_like) {
+          # Two categorical variables -> Two-Way Table
           tbl <- table(df[[var_name]], df[[group_var]], dnn = c(var_name, group_var))
           tbl_with_margins <- addmargins(tbl)
-          datatable(as.data.frame.matrix(tbl_with_margins), 
-                    options = list(dom = 't'),
-                    rownames = TRUE,
-                    caption = htmltools::tags$caption(style = 'caption-side: top; text-align: left;', 'Two-Way Contingency Table (Counts)'))
-          
-        } else if (!var_is_cat && group_is_cat) {
+          datatable(as.data.frame.matrix(tbl_with_margins), options = list(dom = 't'), rownames = TRUE, caption = 'Two-Way Contingency Table (Counts)')
+        } else if (is.numeric(df[[var_name]]) && group_is_cat_like) {
+          # Numeric grouped by categorical -> Grouped Summary
           grouped_summary <- df %>%
             group_by(.data[[group_var]]) %>%
             summarise(
@@ -369,328 +368,200 @@ server <- function(input, output, session) {
               Median = round(median(.data[[var_name]], na.rm = TRUE), 2),
               SD = round(sd(.data[[var_name]], na.rm = TRUE), 2),
               Min = round(min(.data[[var_name]], na.rm = TRUE), 2),
-              Q1 = round(as.numeric(quantile(.data[[var_name]], 0.25, na.rm = TRUE)), 2),
-              Q3 = round(as.numeric(quantile(.data[[var_name]], 0.75, na.rm = TRUE)), 2),
+              Q1 = round(quantile(.data[[var_name]], 0.25, na.rm = TRUE), 2),
+              Q3 = round(quantile(.data[[var_name]], 0.75, na.rm = TRUE), 2),
               Max = round(max(.data[[var_name]], na.rm = TRUE), 2)
             )
-          datatable(grouped_summary, 
-                    options = list(dom = 't'), 
-                    rownames = FALSE,
-                    caption = htmltools::tags$caption(style = 'caption-side: top; text-align: left;', 'Descriptive Statistics (Grouped)'))
-          
+          datatable(grouped_summary, options = list(dom = 't'), rownames = FALSE, caption = 'Descriptive Statistics (Grouped)')
         } else {
           datatable(data.frame(Message = "This combination is not supported."), options = list(dom = 't'))
         }
-        
       } else {
-        if (is_categorical_like(df[[var_name]])) {
+        # --- THIS IS THE KEY FIX ---
+        if (is_strictly_categorical) {
+          # One categorical variable -> Frequency Table
           summary_table <- df %>%
             filter(!is.na(.data[[var_name]])) %>%
             count(.data[[var_name]], name = "Frequency") %>%
             mutate(Relative_Frequency = scales::percent(Frequency / sum(Frequency), accuracy = 0.1))
-          
-          datatable(summary_table, 
-                    options = list(dom = 't'), 
-                    rownames = FALSE,
-                    caption = htmltools::tags$caption(style = 'caption-side: top; text-align: left;', 'Frequency Distribution Table'))
-          
+          datatable(summary_table, options = list(dom = 't'), rownames = FALSE, caption = 'Frequency Distribution Table')
         } else {
+          # Any other type (including numeric) -> Descriptive Stats Table
           summary_df <- data.frame(
             Statistic = c("N", "Mean", "Median", "SD", "Min", "Q1", "Q3", "Max"),
             Value = c(
-              length(na.omit(df[[var_name]])),
+              sum(!is.na(df[[var_name]])),
               round(mean(df[[var_name]], na.rm = TRUE), 2),
               round(median(df[[var_name]], na.rm = TRUE), 2),
               round(sd(df[[var_name]], na.rm = TRUE), 2),
               round(min(df[[var_name]], na.rm = TRUE), 2),
-              round(as.numeric(quantile(df[[var_name]], 0.25, na.rm = TRUE)), 2),
-              round(as.numeric(quantile(df[[var_name]], 0.75, na.rm = TRUE)), 2),
+              round(quantile(df[[var_name]], 0.25, na.rm = TRUE), 2),
+              round(quantile(df[[var_name]], 0.75, na.rm = TRUE), 2),
               round(max(df[[var_name]], na.rm = TRUE), 2)
             )
           )
-          datatable(summary_df, 
-                    options = list(dom = 't'), 
-                    rownames = FALSE,
-                    caption = htmltools::tags$caption(style = 'caption-side: top; text-align: left;', 'Descriptive Statistics'))
+          datatable(summary_df, options = list(dom = 't'), rownames = FALSE, caption = 'Descriptive Statistics')
         }
       }
-    })
+    }, server = FALSE)
     
-    # --- REPLACEMENT for output$histogram_plot ---
+    # --- Histogram ---
     output$histogram_plot <- renderPlot({
       df <- data_r()
-      req(df, input$descriptive_variable)
+      req(df, input$descriptive_variable, input$descriptive_variable %in% names(df))
       var <- input$descriptive_variable
-      
-      validate(need(is.numeric(df[[var]]), "Histogram is for quantitative (numeric) variables only."))
+      validate(need(is.numeric(df[[var]]), "Histogram requires a quantitative (numeric) variable."))
       
       y_formatter <- if (input$hist_yaxis_type == "percent") scales::percent_format(accuracy = 1) else NULL
-      
       gg <- ggplot(df, aes(x = .data[[var]]))
-      
       if (input$hist_yaxis_type == "percent") {
-        gg <- gg + geom_histogram(aes(y = ..count.. / sum(..count..)), 
-                                  bins = input$hist_bins, fill = "steelblue", color = "white")
+        gg <- gg + geom_histogram(aes(y = after_stat(count / sum(count))), bins = input$hist_bins, fill = "steelblue", color = "white")
       } else {
         gg <- gg + geom_histogram(bins = input$hist_bins, fill = "steelblue", color = "white")
       }
-      
       y_axis_label <- if (input$hist_yaxis_type == "percent") "Percent" else "Count (Frequency)"
-      
-      gg <- gg + 
-        scale_y_continuous(labels = y_formatter) +
-        labs(title = paste("Histogram of", var), x = var, y = y_axis_label)
-      
+      gg <- gg + scale_y_continuous(labels = y_formatter) + labs(title = paste("Histogram of", var), x = var, y = y_axis_label)
       if (isTRUE(input$show_mean_median)) {
-        gg <- gg +
-          geom_vline(aes(xintercept = mean(df[[var]], na.rm = TRUE)), color = "red", linetype = "dashed") +
+        gg <- gg + geom_vline(aes(xintercept = mean(df[[var]], na.rm = TRUE)), color = "red", linetype = "dashed") +
           geom_vline(aes(xintercept = median(df[[var]], na.rm = TRUE)), color = "green", linetype = "dashed")
       }
-      
       gg
     })
     
-    # --- Definitive Corrected Box Plot Logic ---
+    # --- Box Plot ---
     output$boxplot_plot <- renderPlot({
-      req(df, input$descriptive_variable)
+      df <- data_r()
+      req(df, input$descriptive_variable, input$descriptive_variable %in% names(df))
       var_name <- input$descriptive_variable
       group_var <- input$group_by_variable
       
-      if (!is.character(df[[var_name]]) && !is.factor(df[[var_name]])) {
-        
-        if (group_var != "None" && group_var %in% names(df)) {
+      if (is.numeric(df[[var_name]])) {
+        if (group_var != "None" && group_var %in% names(df) && (is.character(df[[group_var]]) || is.factor(df[[group_var]]))) {
           ggplot(df, aes(x = as.factor(.data[[group_var]]), y = .data[[var_name]], fill = as.factor(.data[[group_var]]))) +
-            geom_boxplot() +
-            labs(
-              title = paste("Boxplot of", var_name, "by", group_var),
-              x = group_var,
-              y = var_name
-            ) +
-            theme(legend.position = "none")
-          
+            geom_boxplot() + labs(title = paste("Boxplot of", var_name, "by", group_var), x = group_var, y = var_name) + theme(legend.position = "none")
         } else {
-          ggplot(df, aes(x = .data[[var_name]])) +
-            geom_boxplot(fill = "lightgreen") +
-            labs(
-              title = paste("Boxplot of", var_name),
-              x = var_name,
-              y = NULL
-            ) +
-            theme(
-              axis.text.y = element_blank(),
-              axis.ticks.y = element_blank()
-            )
+          ggplot(df, aes(y = .data[[var_name]])) +
+            geom_boxplot(fill = "lightgreen") + labs(title = paste("Boxplot of", var_name), y = var_name, x = NULL) + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
         }
       } else {
-        ggplot() +
-          annotate("text", x = 0, y = 0, label = "Box plot requires a numeric variable.", size = 5) +
-          theme_void()
+        ggplot() + annotate("text", x = 0, y = 0, label = "Box plot requires a numeric variable.", size = 5) + theme_void()
       }
     })
     
+    # --- Density Plot ---
     output$density_plot <- renderPlot({
-      req(df, input$descriptive_variable)
+      df <- data_r()
+      req(df, input$descriptive_variable, input$descriptive_variable %in% names(df))
       var <- input$descriptive_variable
-      group_var <- input$group_by_variable
       validate(need(is.numeric(df[[var]]), "Density plot requires a numeric variable."))
       
+      group_var <- input$group_by_variable
       gg <- ggplot(df, aes(x = .data[[var]]))
-      
       if (group_var != "None" && group_var %in% names(df)) {
-        gg <- gg +
-          geom_density(fill = "blue", alpha = 0.4) +
-          facet_wrap(vars(.data[[group_var]]), scales = "free_y")
+        gg <- gg + geom_density(fill = "blue", alpha = 0.4) + facet_wrap(vars(.data[[group_var]]), scales = "free_y")
       } else {
-        gg <- gg +
-          geom_density(fill = "blue", alpha = 0.4)
+        gg <- gg + geom_density(fill = "blue", alpha = 0.4)
       }
-      
       gg + labs(title = paste("Density Plot of", var), x = var, y = "Density")
     })
     
+    # --- Pie Chart ---
     output$pie_chart_plot <- renderPlot({
-      req(df, input$descriptive_variable)
+      df <- data_r()
+      req(df, input$descriptive_variable, input$descriptive_variable %in% names(df))
       var_name <- input$descriptive_variable
-      group_var <- input$group_by_variable
-      validate(
-        need(var_name %in% names(df), "Selected variable not found."),
-        need(!is.numeric(df[[var_name]]), "Pie chart requires a categorical variable.")
-      )
+      validate(need(!is.numeric(df[[var_name]]), "Pie chart requires a categorical variable."))
       
-      if (group_var != "None" && group_var %in% names(df)) {
-        df_summary <- df %>%
-          filter(!is.na(.data[[var_name]]), !is.na(.data[[group_var]])) %>%
-          group_by(.data[[group_var]], .data[[var_name]]) %>%
-          summarise(Count = n(), .groups = "drop_last") %>%
-          group_by(.data[[group_var]]) %>%
-          mutate(
-            Percentage = Count / sum(Count),
-            Label = paste0(round(Percentage * 100, 1), "%")
-          )
-        ggplot(df_summary, aes(x = "", y = Percentage, fill = .data[[var_name]])) +
-          geom_col(width = 1) +
-          coord_polar(theta = "y") +
-          facet_wrap(vars(.data[[group_var]])) +
-          geom_text(aes(label = Label), position = position_stack(vjust = 0.5), color = "white", size = 4) +
-          theme_void() +
-          labs(title = paste("Pie Chart of", var_name, "by", group_var))
-      } else {
-        df_summary <- df %>%
-          filter(!is.na(.data[[var_name]])) %>%
-          mutate(across(all_of(var_name), as.character)) %>%
-          group_by(.data[[var_name]]) %>%
-          summarise(Count = n(), .groups = "drop") %>%
-          mutate(
-            Percentage = Count / sum(Count),
-            Label = paste0(round(Percentage * 100, 1), "%")
-          )
-        ggplot(df_summary, aes(x = "", y = Percentage, fill = .data[[var_name]])) +
-          geom_col(width = 1) +
-          coord_polar(theta = "y") +
-          geom_text(aes(label = Label), position = position_stack(vjust = 0.5), color = "white", size = 4) +
-          theme_void() +
-          labs(title = paste("Pie Chart of", var_name))
+      df_summary <- df %>%
+        filter(!is.na(.data[[var_name]])) %>%
+        count(.data[[var_name]], name = "Count") %>%
+        mutate(
+          Percentage = Count / sum(Count),
+          Label = paste0(round(Percentage * 100, 1), "%")
+        )
+      ggplot(df_summary, aes(x = "", y = Percentage, fill = as.factor(.data[[var_name]]))) +
+        geom_col(width = 1) +
+        coord_polar(theta = "y") +
+        geom_text(aes(label = Label), position = position_stack(vjust = 0.5), color = "white", size = 4) +
+        theme_void() +
+        labs(title = paste("Pie Chart of", var_name), fill = var_name)
+    })
+    
+    # --- Bar Chart ---
+    output$barchart_plot <- renderPlot({
+      df <- data_r()
+      req(df, input$descriptive_variable, input$descriptive_variable %in% names(df))
+      var_name <- input$descriptive_variable
+      validate(need(is.character(df[[var_name]]) || is.factor(df[[var_name]]), "Bar chart is for categorical (text) variables only."))
+      
+      df_summary <- df %>%
+        filter(!is.na(.data[[var_name]])) %>%
+        count(.data[[var_name]], name = "Frequency") %>%
+        mutate(Proportion = Frequency / sum(Frequency))
+      
+      y_axis_var <- if (input$barchart_yaxis_type == "proportion") "Proportion" else "Frequency"
+      y_axis_label <- if (input$barchart_yaxis_type == "proportion") "Relative Frequency" else "Count"
+      
+      gg <- ggplot(df_summary, aes(x = as.factor(.data[[var_name]]), y = .data[[y_axis_var]])) +
+        geom_col(fill = "cornflowerblue") +
+        labs(title = paste("Bar Chart of", var_name), x = var_name, y = y_axis_label)
+      
+      if (input$barchart_yaxis_type == "proportion") {
+        gg <- gg + scale_y_continuous(labels = scales::percent)
       }
+      gg
     })
   })
   
   observeEvent(input$generate_scatter, {
-    df <- data_r()
-    req(df, input$scatter_x, input$scatter_y)
-    
     output$scatter_plot <- renderPlot({
+      df <- data_r()
+      req(df, input$scatter_x, input$scatter_y, input$scatter_x %in% names(df), input$scatter_y %in% names(df))
       x_var <- input$scatter_x
       y_var <- input$scatter_y
-      group_var <- input$group_by_variable
       
       validate(
-        need(x_var %in% names(df) && y_var %in% names(df), "Selected variable(s) not found."),
         need(is.numeric(df[[x_var]]) && is.numeric(df[[y_var]]), "Scatter plots require numeric variables.")
       )
       
-      gg <- ggplot(df, aes(x = .data[[x_var]], y = .data[[y_var]]))
-      
-      if (group_var != "None" && group_var %in% names(df)) {
-        gg <- gg + geom_point(aes(color = .data[[group_var]]))
-      } else {
-        gg <- gg + geom_point(color = "darkblue")
-      }
-      
-      gg + labs(title = paste("Scatter Plot of", y_var, "vs", x_var), x = x_var, y = y_var)
+      ggplot(df, aes(x = .data[[x_var]], y = .data[[y_var]])) +
+        geom_point(color = "darkblue") +
+        labs(title = paste("Scatter Plot of", y_var, "vs", x_var), x = x_var, y = y_var)
     })
   })
   
   observeEvent(input$generate_dot_plot, {
-    df <- data_r()
-    req(df, input$dot_plot_variable)
-    
-    var <- input$dot_plot_variable
-    validate(need(is.numeric(df[[var]]), "Dot plot requires a numeric variable."))
-    
-    data_vec <- na.omit(df[[var]])
-    
-    if (length(data_vec) < 2) {
-      showNotification("Not enough data to generate a dot plot.", type = "warning")
-      current_dot_plot(NULL) 
-      return()
-    }
-    
-    data_range <- max(data_vec) - min(data_vec)
-    dynamic_binwidth <- if (data_range == 0) 1 else data_range / 30
-    
-    p_base <- ggplot(df, aes(x = .data[[var]])) +
-      geom_dotplot(
-        binaxis = 'x',
-        stackdir = 'up',
-        dotsize = 0.8,
-        fill = "steelblue",
-        binwidth = dynamic_binwidth
-      )
-    
-    built_p <- ggplot_build(p_base)
-    max_freq <- max(built_p$data[[1]]$count)
-    
-    y_breaks <- if (max_freq > 1) {
-      seq(from = 1, to = floor(max_freq), by = 1)
-    } else {
-      1
-    }
-    
-    p_final <- p_base + 
-      scale_y_continuous(
-        breaks = y_breaks,
-        limits = c(0, NA),
-        expand = expansion(mult = c(0.02, 0.05))
-      ) +
-      scale_x_continuous(
-        breaks = scales::pretty_breaks(n = 7)
-      ) +
-      labs(
-        title = paste("Dot Plot of", var),
-        x = var,
-        y = "Frequency"
-      ) +
-      theme_light() + 
-      theme(
-        axis.text.x = element_text(color = "gray30", size = 10, angle = 0),
-        axis.text.y = element_text(color = "gray30", size = 10),
-        axis.title = element_text(color = "gray30", size = 11),
-        panel.grid.minor = element_blank()
-      )
-    
-    current_dot_plot(p_final) 
-  })
-  
-  output$barchart_plot <- renderPlot({
-    df <- data_r()
-    
-    req(df, input$descriptive_variable)
-    var_name <- input$descriptive_variable
-    
-    validate(need(is.character(df[[var_name]]) || is.factor(df[[var_name]]), "Bar chart is for categorical (text) variables only."))
-    
-    df_summary <- df %>%
-      filter(!is.na(.data[[var_name]])) %>%
-      count(.data[[var_name]], name = "Frequency") %>%
-      mutate(Proportion = Frequency / sum(Frequency))
-    
-    y_axis_var <- if (input$barchart_yaxis_type == "proportion") "Proportion" else "Frequency"
-    y_axis_label <- if (input$barchart_yaxis_type == "proportion") "Relative Frequency" else "Count"
-    
-    gg <- ggplot(df_summary, aes(x = as.factor(.data[[var_name]]), y = .data[[y_axis_var]])) +
-      geom_col(fill = "cornflowerblue") +
-      labs(
-        title = paste("Bar Chart of", var_name),
-        x = var_name,
-        y = y_axis_label
-      )
-    
-    if (input$barchart_yaxis_type == "proportion") {
-      gg <- gg + scale_y_continuous(labels = scales::percent)
-    }
-    
-    gg
-  })
-  
-  output$dot_plot <- renderPlot({
-    req(current_dot_plot())
-    current_dot_plot()
+    output$dot_plot <- renderPlot({
+      df <- data_r()
+      req(df, input$dot_plot_variable, input$dot_plot_variable %in% names(df))
+      var <- input$dot_plot_variable
+      validate(need(is.numeric(df[[var]]), "Dot plot requires a numeric variable."))
+      
+      data_vec <- na.omit(df[[var]])
+      
+      if (length(data_vec) < 2) {
+        # Return a message plot instead of a notification
+        return(ggplot() + annotate("text", x=0,y=0, label="Not enough data for dot plot.") + theme_void())
+      }
+      
+      data_range <- max(data_vec) - min(data_vec)
+      dynamic_binwidth <- if (data_range == 0) 1 else data_range / 30
+      
+      p <- ggplot(df, aes(x = .data[[var]])) +
+        geom_dotplot(binaxis = 'x', stackdir = 'up', dotsize = 0.8, fill = "steelblue", binwidth = dynamic_binwidth) +
+        labs(title = paste("Dot Plot of", var), x = var, y = "Frequency") +
+        theme_light()
+      
+      current_dot_plot(p) # Save for download
+      p
+    })
   })
   
   output$download_dot_plot <- downloadHandler(
-    filename = function() {
-      paste("dot-plot-", Sys.Date(), ".png", sep = "")
-    },
+    filename = function() { paste("dot-plot-", Sys.Date(), ".png", sep = "") },
     content = function(file) {
       req(current_dot_plot())
-      ggsave(
-        filename = file,
-        plot = current_dot_plot(),
-        width = 8,
-        height = 6,
-        dpi = 300,
-        units = "in"
-      )
+      ggsave(filename = file, plot = current_dot_plot(), width = 8, height = 6, dpi = 300, units = "in")
     }
   )
   
@@ -703,20 +574,22 @@ server <- function(input, output, session) {
     iv1 <- input$anova_iv
     iv2 <- input$anova_iv2
     
-    if (!is.numeric(df[[dv]])) {
-      showNotification("Dependent variable must be numeric.", type = "warning")
-      return(NULL)
-    }
-    if (!is.factor(df[[iv1]]) && !is.character(df[[iv1]])) {
-      showNotification("First independent variable must be categorical.", type = "warning")
-      return(NULL)
-    }
+    validate(
+      need(input$anova_dv %in% names(df), "Dependent variable not found in data."),
+      need(input$anova_iv %in% names(df), "Independent variable not found in data.")
+    )
+    
+    validate(
+      need(is.numeric(df[[dv]]), "Dependent variable must be numeric."),
+      need(!is.numeric(df[[iv1]]), "First independent variable must be categorical.")
+    )
     
     df[[iv1]] <- as.factor(df[[iv1]])
     
     output$anova_output <- renderPrint({
       
       if (!is.null(iv2) && iv2 != "None") {
+        validate(need(input$anova_iv2 %in% names(df), "Second independent variable not found."))
         df[[iv2]] <- as.factor(df[[iv2]])
         
         formula_str <- paste(dv, "~", iv1, "*", iv2)
@@ -753,14 +626,10 @@ server <- function(input, output, session) {
     })
   })
   
-  # --- START: FINAL REORDERED REPLACEMENT for observeEvent(input$run_prop_test, ...) ---
-  # This version moves the summary estimate to the bottom of the output.
-  
   observeEvent(input$run_prop_test, {
     output$prop_test_result <- renderPrint({
       
       if (isTRUE(input$prop_test_manual_mode)) {
-        # --- MANUAL MODE ---
         req(input$prop_manual_successes, input$prop_manual_trials, input$prop_null)
         successes <- input$prop_manual_successes
         total <- input$prop_manual_trials
@@ -777,15 +646,12 @@ server <- function(input, output, session) {
         
         estimate_string <- paste0("Sample Estimate (p\U0302): ", round(sample_p, 4), " \U00B1 ", round(se, 4), " (SE)")
         
-        # --- THE FIX: Reorder the print statements ---
         cat("One-Proportion Test (Manual Input)\n")
-        print(test) # Print the main test results first
-        cat("\n----------------------------------\n") # Add a separator for clarity
-        cat(estimate_string) # Print the summary line at the bottom
-        # --- END FIX ---
+        print(test)
+        cat("\n----------------------------------\n")
+        cat(estimate_string)
         
       } else {
-        # --- DATA-DRIVEN MODE ---
         df <- data_r()
         req(df, input$prop_variable, input$success_value, input$prop_null)
         var <- input$prop_variable
@@ -806,22 +672,14 @@ server <- function(input, output, session) {
         
         estimate_string <- paste0("Sample Estimate (p\U0302): ", round(sample_p, 4), " \U00B1 ", round(se, 4), " (SE)")
         
-        # --- THE FIX: Reorder the print statements ---
         cat("One-Proportion Test (from Dataset)\n")
         cat("Variable:", var, "| Success Value:", success_val, "\n")
-        print(test) # Print the main test results first
-        cat("\n----------------------------------\n") # Add a separator for clarity
-        cat(estimate_string) # Print the summary line at the bottom
-        # --- END FIX ---
+        print(test)
+        cat("\n----------------------------------\n")
+        cat(estimate_string)
       }
     })
   })
-  
-  # --- END OF REPLACEMENT ---
-
-  
-  # --- START: FINAL, CORRECTED REPLACEMENT for observeEvent(input$run_two_prop_test, ...) ---
-  # This version fixes the validation logic for numeric categorical variables.
   
   observeEvent(input$run_two_prop_test, {
     df <- data_r()
@@ -833,7 +691,6 @@ server <- function(input, output, session) {
     group2 <- input$two_prop_group2
     success_val <- input$two_prop_success
     
-    # --- THE FIX IS HERE: Smarter Validation Logic ---
     is_categorical_like <- function(vec) {
       is.character(vec) || is.factor(vec) || (is.numeric(vec) && length(unique(na.omit(vec))) < 15)
     }
@@ -846,7 +703,6 @@ server <- function(input, output, session) {
       output$two_prop_test_result <- renderPrint({ "Grouping variable must be categorical or discrete numeric (e.g., 0/1)." })
       return(NULL)
     }
-    # --- END OF FIX ---
     
     df[[prop_var]] <- as.factor(df[[prop_var]])
     df[[group_var]] <- as.factor(df[[group_var]])
@@ -883,9 +739,6 @@ server <- function(input, output, session) {
     })
   })
   
-  # --- END OF REPLACEMENT ---
-  # --- START: FINAL, ROBUST REPLACEMENT for observeEvent(input$run_ht, ...) ---
-  
   observeEvent(input$run_ht, {
     req(data_r(), input$ht_variable)
     df <- data_r()
@@ -900,7 +753,6 @@ server <- function(input, output, session) {
     
     output$ht_output <- renderPrint({
       if (!is.null(group_var) && group_var != "None" && group_var %in% names(df)) {
-        # --- TWO-SAMPLE T-TEST LOGIC ---
         df_filtered <- df %>% filter(!is.na(.data[[var_name]]), !is.na(.data[[group_var]]))
         df_filtered[[group_var]] <- as.factor(df_filtered[[group_var]])
         
@@ -914,25 +766,20 @@ server <- function(input, output, session) {
                               alternative = input$ht_alternative,
                               var.equal = input$ht_var_equal)
         
-        # --- NEW ROBUST LOGIC FOR STANDARD ERROR ---
         if (isTRUE(input$ht_var_equal)) {
-          # For Student's t-test, R provides the SE directly
           se_diff <- test_result$stderr
           cat("Two-Sample t-test (Student's)\n------------------------------\n")
         } else {
-          # For Welch's t-test, we calculate it manually
           mean_diff <- test_result$estimate[1] - test_result$estimate[2]
           t_stat <- test_result$statistic
           se_diff <- mean_diff / t_stat
           cat("Two-Sample t-test (Welch's)\n----------------------------\n")
         }
-        # --- END NEW LOGIC ---
         
         cat("Standard Error of Difference:", round(se_diff, 4), "\n\n")
         print(test_result)
         
       } else {
-        # --- ONE-SAMPLE T-TEST LOGIC (Unchanged) ---
         sample_data <- na.omit(df[[var_name]])
         test_result <- t.test(sample_data, mu = mu, alternative = input$ht_alternative)
         
@@ -947,8 +794,6 @@ server <- function(input, output, session) {
       }
     })
   })
-  
-  # --- END OF REPLACEMENT ---
   
   observeEvent(input$run_paired_ttest, {
     df <- data_r()
