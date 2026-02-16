@@ -1,4 +1,4 @@
-# server.R (Complete Corrected Version for Height Bug)
+# server.R (Complete Corrected Version with Faceting)
 
 server <- function(input, output, session) {
   
@@ -329,37 +329,27 @@ server <- function(input, output, session) {
   })
   
   
-  # --- START: ROBUST REPLACEMENT for Descriptive Statistics Logic ---
+  # --- START: ROBUST REPLACEMENT for Descriptive Statistics Logic (with Faceting) ---
   observeEvent(input$analyze_descriptive, {
     
     # --- Summary Statistics Table ---
     output$summary_stats_output <- renderDT({
       df <- data_r()
       req(df, input$descriptive_variable, input$descriptive_variable %in% names(df))
-      
       var_name <- input$descriptive_variable
       group_var <- input$group_by_variable
       
       if (var_name == "") return(NULL)
       
-      # Use a strict definition for categorical for this specific output
       is_strictly_categorical <- is.character(df[[var_name]]) || is.factor(df[[var_name]])
-      
-      # Use the smarter "categorical-like" definition for grouping variables
-      is_categorical_like <- function(vec) {
-        is.character(vec) || is.factor(vec) || (is.numeric(vec) && length(unique(na.omit(vec))) < 15)
-      }
+      is_categorical_like <- function(vec) { is.character(vec) || is.factor(vec) || (is.numeric(vec) && length(unique(na.omit(vec))) < 15) }
       
       if (group_var != "None" && group_var %in% names(df)) {
         group_is_cat_like <- is_categorical_like(df[[group_var]])
-        
         if (is_strictly_categorical && group_is_cat_like) {
-          # Two categorical variables -> Two-Way Table
           tbl <- table(df[[var_name]], df[[group_var]], dnn = c(var_name, group_var))
-          tbl_with_margins <- addmargins(tbl)
-          datatable(as.data.frame.matrix(tbl_with_margins), options = list(dom = 't'), rownames = TRUE, caption = 'Two-Way Contingency Table (Counts)')
+          datatable(as.data.frame.matrix(addmargins(tbl)), options = list(dom = 't'), rownames = TRUE, caption = 'Two-Way Contingency Table (Counts)')
         } else if (is.numeric(df[[var_name]]) && group_is_cat_like) {
-          # Numeric grouped by categorical -> Grouped Summary
           grouped_summary <- df %>%
             group_by(.data[[group_var]]) %>%
             summarise(
@@ -377,27 +367,20 @@ server <- function(input, output, session) {
           datatable(data.frame(Message = "This combination is not supported."), options = list(dom = 't'))
         }
       } else {
-        # --- THIS IS THE KEY FIX ---
         if (is_strictly_categorical) {
-          # One categorical variable -> Frequency Table
           summary_table <- df %>%
             filter(!is.na(.data[[var_name]])) %>%
             count(.data[[var_name]], name = "Frequency") %>%
             mutate(Relative_Frequency = scales::percent(Frequency / sum(Frequency), accuracy = 0.1))
           datatable(summary_table, options = list(dom = 't'), rownames = FALSE, caption = 'Frequency Distribution Table')
         } else {
-          # Any other type (including numeric) -> Descriptive Stats Table
           summary_df <- data.frame(
             Statistic = c("N", "Mean", "Median", "SD", "Min", "Q1", "Q3", "Max"),
             Value = c(
-              sum(!is.na(df[[var_name]])),
-              round(mean(df[[var_name]], na.rm = TRUE), 2),
-              round(median(df[[var_name]], na.rm = TRUE), 2),
-              round(sd(df[[var_name]], na.rm = TRUE), 2),
-              round(min(df[[var_name]], na.rm = TRUE), 2),
-              round(quantile(df[[var_name]], 0.25, na.rm = TRUE), 2),
-              round(quantile(df[[var_name]], 0.75, na.rm = TRUE), 2),
-              round(max(df[[var_name]], na.rm = TRUE), 2)
+              sum(!is.na(df[[var_name]])), round(mean(df[[var_name]], na.rm = TRUE), 2),
+              round(median(df[[var_name]], na.rm = TRUE), 2), round(sd(df[[var_name]], na.rm = TRUE), 2),
+              round(min(df[[var_name]], na.rm = TRUE), 2), round(quantile(df[[var_name]], 0.25, na.rm = TRUE), 2),
+              round(quantile(df[[var_name]], 0.75, na.rm = TRUE), 2), round(max(df[[var_name]], na.rm = TRUE), 2)
             )
           )
           datatable(summary_df, options = list(dom = 't'), rownames = FALSE, caption = 'Descriptive Statistics')
@@ -405,25 +388,48 @@ server <- function(input, output, session) {
       }
     }, server = FALSE)
     
-    # --- Histogram ---
+    # --- Histogram (with Faceting) ---
     output$histogram_plot <- renderPlot({
       df <- data_r()
       req(df, input$descriptive_variable, input$descriptive_variable %in% names(df))
       var <- input$descriptive_variable
+      group_var <- input$group_by_variable
       validate(need(is.numeric(df[[var]]), "Histogram requires a quantitative (numeric) variable."))
       
       y_formatter <- if (input$hist_yaxis_type == "percent") scales::percent_format(accuracy = 1) else NULL
+      y_axis_label <- if (input$hist_yaxis_type == "percent") "Percent" else "Count (Frequency)"
+      
       gg <- ggplot(df, aes(x = .data[[var]]))
+      
       if (input$hist_yaxis_type == "percent") {
         gg <- gg + geom_histogram(aes(y = after_stat(count / sum(count))), bins = input$hist_bins, fill = "steelblue", color = "white")
       } else {
         gg <- gg + geom_histogram(bins = input$hist_bins, fill = "steelblue", color = "white")
       }
-      y_axis_label <- if (input$hist_yaxis_type == "percent") "Percent" else "Count (Frequency)"
-      gg <- gg + scale_y_continuous(labels = y_formatter) + labs(title = paste("Histogram of", var), x = var, y = y_axis_label)
-      if (isTRUE(input$show_mean_median)) {
-        gg <- gg + geom_vline(aes(xintercept = mean(df[[var]], na.rm = TRUE)), color = "red", linetype = "dashed") +
-          geom_vline(aes(xintercept = median(df[[var]], na.rm = TRUE)), color = "green", linetype = "dashed")
+      
+      gg <- gg + scale_y_continuous(labels = y_formatter)
+      
+      if (group_var != "None" && group_var %in% names(df)) {
+        gg <- gg + facet_wrap(vars(.data[[group_var]]), scales = "free_y") +
+          labs(title = paste("Histogram of", var, "by", group_var), x = var, y = y_axis_label)
+        
+        if (isTRUE(input$show_mean_median)) {
+          summary_lines <- df %>%
+            group_by(.data[[group_var]]) %>%
+            summarise(mean_val = mean(.data[[var]], na.rm = TRUE),
+                      median_val = median(.data[[var]], na.rm = TRUE))
+          
+          gg <- gg +
+            geom_vline(data = summary_lines, aes(xintercept = mean_val), color = "red", linetype = "dashed") +
+            geom_vline(data = summary_lines, aes(xintercept = median_val), color = "green", linetype = "dashed")
+        }
+      } else {
+        gg <- gg + labs(title = paste("Histogram of", var), x = var, y = y_axis_label)
+        if (isTRUE(input$show_mean_median)) {
+          gg <- gg +
+            geom_vline(aes(xintercept = mean(df[[var]], na.rm = TRUE)), color = "red", linetype = "dashed") +
+            geom_vline(aes(xintercept = median(df[[var]], na.rm = TRUE)), color = "green", linetype = "dashed")
+        }
       }
       gg
     })
@@ -434,7 +440,6 @@ server <- function(input, output, session) {
       req(df, input$descriptive_variable, input$descriptive_variable %in% names(df))
       var_name <- input$descriptive_variable
       group_var <- input$group_by_variable
-      
       if (is.numeric(df[[var_name]])) {
         if (group_var != "None" && group_var %in% names(df) && (is.character(df[[group_var]]) || is.factor(df[[group_var]]))) {
           ggplot(df, aes(x = as.factor(.data[[group_var]]), y = .data[[var_name]], fill = as.factor(.data[[group_var]]))) +
@@ -448,21 +453,24 @@ server <- function(input, output, session) {
       }
     })
     
-    # --- Density Plot ---
+    # --- Density Plot (with Faceting) ---
     output$density_plot <- renderPlot({
       df <- data_r()
       req(df, input$descriptive_variable, input$descriptive_variable %in% names(df))
       var <- input$descriptive_variable
+      group_var <- input$group_by_variable
       validate(need(is.numeric(df[[var]]), "Density plot requires a numeric variable."))
       
-      group_var <- input$group_by_variable
-      gg <- ggplot(df, aes(x = .data[[var]]))
       if (group_var != "None" && group_var %in% names(df)) {
-        gg <- gg + geom_density(fill = "blue", alpha = 0.4) + facet_wrap(vars(.data[[group_var]]), scales = "free_y")
+        ggplot(df, aes(x = .data[[var]])) +
+          geom_density(fill = "blue", alpha = 0.4) +
+          facet_wrap(vars(.data[[group_var]]), scales = "free_y") +
+          labs(title = paste("Density Plot of", var, "by", group_var), x = var, y = "Density")
       } else {
-        gg <- gg + geom_density(fill = "blue", alpha = 0.4)
+        ggplot(df, aes(x = .data[[var]])) +
+          geom_density(fill = "blue", alpha = 0.4) +
+          labs(title = paste("Density Plot of", var), x = var, y = "Density")
       }
-      gg + labs(title = paste("Density Plot of", var), x = var, y = "Density")
     })
     
     # --- Pie Chart ---
@@ -512,6 +520,7 @@ server <- function(input, output, session) {
       gg
     })
   })
+  # --- END ROBUST REPLACEMENT ---
   
   observeEvent(input$generate_scatter, {
     output$scatter_plot <- renderPlot({
@@ -540,7 +549,6 @@ server <- function(input, output, session) {
       data_vec <- na.omit(df[[var]])
       
       if (length(data_vec) < 2) {
-        # Return a message plot instead of a notification
         return(ggplot() + annotate("text", x=0,y=0, label="Not enough data for dot plot.") + theme_void())
       }
       
@@ -552,7 +560,7 @@ server <- function(input, output, session) {
         labs(title = paste("Dot Plot of", var), x = var, y = "Frequency") +
         theme_light()
       
-      current_dot_plot(p) # Save for download
+      current_dot_plot(p) 
       p
     })
   })
@@ -579,9 +587,13 @@ server <- function(input, output, session) {
       need(input$anova_iv %in% names(df), "Independent variable not found in data.")
     )
     
+    is_categorical_like <- function(vec) {
+      is.character(vec) || is.factor(vec) || (is.numeric(vec) && length(unique(na.omit(vec))) < 15)
+    }
+    
     validate(
       need(is.numeric(df[[dv]]), "Dependent variable must be numeric."),
-      need(!is.numeric(df[[iv1]]), "First independent variable must be categorical.")
+      need(is_categorical_like(df[[iv1]]), "Independent variable must be categorical.")
     )
     
     df[[iv1]] <- as.factor(df[[iv1]])
@@ -590,6 +602,7 @@ server <- function(input, output, session) {
       
       if (!is.null(iv2) && iv2 != "None") {
         validate(need(input$anova_iv2 %in% names(df), "Second independent variable not found."))
+        validate(need(is_categorical_like(df[[iv2]]), "Second independent variable must be categorical."))
         df[[iv2]] <- as.factor(df[[iv2]])
         
         formula_str <- paste(dv, "~", iv1, "*", iv2)
@@ -739,6 +752,9 @@ server <- function(input, output, session) {
     })
   })
   
+  # --- START: FINAL UPGRADED REPLACEMENT for observeEvent(input$run_ht, ...) ---
+  # This version adds the sample size(s) 'n' to the t-test outputs.
+  
   observeEvent(input$run_ht, {
     req(data_r(), input$ht_variable)
     df <- data_r()
@@ -753,6 +769,7 @@ server <- function(input, output, session) {
     
     output$ht_output <- renderPrint({
       if (!is.null(group_var) && group_var != "None" && group_var %in% names(df)) {
+        # --- TWO-SAMPLE T-TEST LOGIC ---
         df_filtered <- df %>% filter(!is.na(.data[[var_name]]), !is.na(.data[[group_var]]))
         df_filtered[[group_var]] <- as.factor(df_filtered[[group_var]])
         
@@ -760,6 +777,12 @@ server <- function(input, output, session) {
           cat("Error: Grouping variable must have exactly two levels for two-sample t-test.\n")
           return()
         }
+        
+        # --- NEW: Calculate n1 and n2 ---
+        sample_sizes <- table(df_filtered[[group_var]])
+        n1 <- sample_sizes[1]
+        n2 <- sample_sizes[2]
+        # --- END NEW ---
         
         test_result <- t.test(as.formula(paste(var_name, "~", group_var)),
                               data = df_filtered,
@@ -776,10 +799,15 @@ server <- function(input, output, session) {
           cat("Two-Sample t-test (Welch's)\n----------------------------\n")
         }
         
+        # --- MODIFIED: Add sample sizes to output ---
+        cat("Sample Sizes (n1, n2):", n1, ",", n2, "\n")
         cat("Standard Error of Difference:", round(se_diff, 4), "\n\n")
+        # --- END MODIFIED ---
+        
         print(test_result)
         
       } else {
+        # --- ONE-SAMPLE T-TEST LOGIC ---
         sample_data <- na.omit(df[[var_name]])
         test_result <- t.test(sample_data, mu = mu, alternative = input$ht_alternative)
         
@@ -788,44 +816,80 @@ server <- function(input, output, session) {
         se <- s / sqrt(n)
         
         cat("One-Sample t-test\n-----------------\n")
+        # --- MODIFIED: Add sample size to output ---
+        cat("Sample Size (n):", n, "\n")
         cat("Sample Mean:", round(test_result$estimate, 4), "\n")
         cat("Standard Error:", round(se, 4), "\n\n")
+        # --- END MODIFIED ---
+        
         print(test_result)
       }
     })
   })
   
-  observeEvent(input$run_paired_ttest, {
-    df <- data_r()
-    req(df, input$paired_var1, input$paired_var2)
+  # --- END OF REPLACEMENT ---d
+  
+# --- START: UPGRADED REPLACEMENT for observeEvent(input$run_paired_ttest, ...) ---
+# This version fixes the data usage bug and adds n and SE to the output.
+
+observeEvent(input$run_paired_ttest, {
+  df <- data_r()
+  req(df, input$paired_var1, input$paired_var2)
+  
+  var1 <- input$paired_var1
+  var2 <- input$paired_var2
+  
+  # --- Validation (unchanged) ---
+  if (var1 == var2) {
+    output$paired_ttest_result <- renderPrint({"Error: Please select two different variables."})
+    return(NULL)
+  }
+  
+  if (!is.numeric(df[[var1]]) || !is.numeric(df[[var2]])) {
+    output$paired_ttest_result <- renderPrint({"Both variables must be numeric."})
+    return(NULL)
+  }
+  
+  # --- BUG FIX Part 1: Correctly use df_clean ---
+  # Create a clean data frame with only complete pairs
+  df_clean <- df %>% select(all_of(c(var1, var2))) %>% na.omit()
+  
+  if (nrow(df_clean) < 2) {
+    output$paired_ttest_result <- renderPrint({"Not enough complete data pairs for a paired t-test."})
+    return(NULL)
+  }
+  
+  # --- NEW FEATURE: Calculate n and SE ---
+  n_pairs <- nrow(df_clean)
+  differences <- df_clean[[var1]] - df_clean[[var2]]
+  se_of_diff <- sd(differences) / sqrt(n_pairs)
+  # --- END NEW FEATURE ---
+  
+  # --- BUG FIX Part 2: Use the cleaned data in the test ---
+  test <- t.test(df_clean[[var1]], df_clean[[var2]], paired = TRUE, alternative = input$paired_alternative)
+  
+  output$paired_ttest_result <- renderPrint({
     
-    var1 <- input$paired_var1
-    var2 <- input$paired_var2
+    # Capture the default R output
+    raw_output <- capture.output(print(test))
     
-    if (var1 == var2) {
-      output$paired_ttest_result <- renderPrint({"Error: Please select two different variables."})
-      return(NULL)
-    }
+    # --- NEW FEATURE: Clean up the "data:" line ---
+    # Find the line that starts with "data:" and replace it with a user-friendly version
+    data_line_index <- grep("data:", raw_output)
+    raw_output[data_line_index] <- paste("data: ", var1, "and", var2)
     
-    if (!is.numeric(df[[var1]]) || !is.numeric(df[[var2]])) {
-      output$paired_ttest_result <- renderPrint({"Both variables must be numeric."})
-      return(NULL)
-    }
+    # --- Assemble the final, custom output ---
+    cat("Paired t-test\n")
+    cat("-----------------\n")
+    cat("Number of Pairs (n):", n_pairs, "\n")
+    cat("Standard Error of Mean Difference:", round(se_of_diff, 4), "\n\n")
     
-    df_clean <- df %>% select(all_of(c(var1, var2))) %>% na.omit()
-    
-    if (nrow(df_clean) < 2) {
-      output$paired_ttest_result <- renderPrint({"Not enough data for paired t-test."})
-      return(NULL)
-    }
-    
-    test <- t.test(df_clean[[var1]], df_clean[[var2]], paired = TRUE, alternative = input$paired_alternative)
-    
-    output$paired_ttest_result <- renderPrint({
-      cat("Paired t-test\n\n")
-      print(test)
-    })
+    # Print the cleaned-up R output
+    cat(paste(raw_output, collapse = "\n"))
   })
+})
+
+# --- END OF REPLACEMENT ---
   
   observeEvent(input$run_chi_sq, {
     

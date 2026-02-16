@@ -1,4 +1,4 @@
-# R/ui_inferential.R
+# R/ui_inferential.R (Complete Corrected Version with Spinners)
 
 inferential_tab_ui <- accordion(
   id = "inferential_accordion",
@@ -12,31 +12,26 @@ inferential_tab_ui <- accordion(
       content = "This test is used to compare the proportion of successes in a sample to a known or hypothesized proportion."
     ),
     
-    # Checkbox to switch between modes
     checkboxInput("prop_test_manual_mode", "Enter summary data manually (independent of dataset)", value = FALSE),
     
-    # UI for using a loaded dataset (DEFAULT) - CONTAINS THE DROPDOWN PLACEHOLDERS
     conditionalPanel(
       condition = "!input.prop_test_manual_mode",
       uiOutput("prop_variable_ui"),
       uiOutput("success_value_ui")
     ),
     
-    # UI for entering data manually
     conditionalPanel(
       condition = "input.prop_test_manual_mode",
       numericInput("prop_manual_successes", "Number of Successes (x)", value = 10, min = 0, step = 1),
       numericInput("prop_manual_trials", "Number of Trials (n)", value = 20, min = 1, step = 1)
     ),
     
-    # The single, shared set of common controls for the One-Proportion Test
     hr(),
-    numericInput("prop_null", "Null Hypothesis Proportion (p\u2080):", value = 0.5, min = 0, max = 1, step = 0.01),
+    numericInput("prop_null", "Null Hypothesis Proportion (p₀):", value = 0.5, min = 0, max = 1, step = 0.01),
     selectInput("prop_alternative", "Alternative Hypothesis:", choices = c("Two-sided" = "two.sided", "Less than" = "less", "Greater than" = "greater")),
     actionButton("run_prop_test", "Run One-Proportion Test"),
-    verbatimTextOutput("prop_test_result"),
+    verbatimTextOutput("prop_test_result") %>% withSpinner(), # <-- Spinner Added
     
-    # The Two-Proportion Test starts here
     hr(),
     with_info_popover(
       ui_element = h4("Two-Proportion Test"),
@@ -50,7 +45,7 @@ inferential_tab_ui <- accordion(
     uiOutput("two_prop_success_ui"),
     selectInput("two_prop_alternative", "Alternative Hypothesis:", choices = c("Two-sided" = "two.sided", "Less than" = "less", "Greater than" = "greater")),
     actionButton("run_two_prop_test", "Run Two-Proportion Test"),
-    verbatimTextOutput("two_prop_test_result")
+    verbatimTextOutput("two_prop_test_result") %>% withSpinner() # <-- Spinner Added
   ),
   
   # Panel 2: Categorical Tests
@@ -65,27 +60,23 @@ inferential_tab_ui <- accordion(
     uiOutput("select_chi_y"),
     checkboxInput("use_fisher_exact", "Use Fisher's Exact Test (for small samples)", value = FALSE),
     actionButton("run_chi_sq", "Run Chi-Squared Test"),
-    # --- START: New Tabbed Output for Chi-Squared ---
     
     navset_card_tab(
       id = "chisq_output_tabs",
       nav_panel(
         "Two-Way Table", 
-        # Add a dropdown to select table type (counts or percentages)
         selectInput("chisq_table_type", "Display:",
                     choices = c("Observed Counts" = "counts",
                                 "Row Percentages" = "row_perc",
                                 "Column Percentages" = "col_perc",
                                 "Total Percentages" = "total_perc")),
-        verbatimTextOutput("chi_sq_table_output")
+        verbatimTextOutput("chi_sq_table_output") %>% withSpinner() # <-- Spinner Added
       ),
       nav_panel(
         "Chi-Squared Test", 
-        verbatimTextOutput("chi_sq_test_output")
+        verbatimTextOutput("chi_sq_test_output") %>% withSpinner() # <-- Spinner Added
       )
     )
-    
-    # --- END: New Tabbed Output for Chi-Squared ---
   ),
   
   # Panel 3: Normality Check
@@ -98,8 +89,8 @@ inferential_tab_ui <- accordion(
     ),
     uiOutput("select_normality_var"),
     actionButton("check_normality", "Check Normality"),
-    plotOutput("normality_plot"),
-    verbatimTextOutput("shapiro_wilk_output")
+    plotOutput("normality_plot") %>% withSpinner(), # <-- Spinner Added
+    verbatimTextOutput("shapiro_wilk_output") %>% withSpinner() # <-- Spinner Added
   ),
   
   # Panel 4: Mean Tests
@@ -114,12 +105,12 @@ inferential_tab_ui <- accordion(
     uiOutput("select_ht_group_variable"),
     conditionalPanel(
       condition = "input.ht_group_variable == 'None'",
-      numericInput("ht_mu", "Hypothesized Mean (\u03bc) for One-Sample Test", value = 0)
+      numericInput("ht_mu", "Hypothesized Mean (μ) for One-Sample Test", value = 0)
     ),
     selectInput("ht_alternative", "Alternative Hypothesis", choices = c("two.sided", "less", "greater")),
     checkboxInput("ht_var_equal", "Assume Equal Variances (for Two-Sample Test)", value = TRUE),
     actionButton("run_ht", "Run t-test"),
-    verbatimTextOutput("ht_output"),
+    verbatimTextOutput("ht_output") %>% withSpinner(), # <-- Spinner Added
     hr(),
     with_info_popover(
       ui_element = h4("Paired t-test"),
@@ -130,7 +121,7 @@ inferential_tab_ui <- accordion(
     uiOutput("paired_var2_ui"),
     selectInput("paired_alternative", "Alternative Hypothesis:", choices = c("Two-sided" = "two.sided", "Less than" = "less", "Greater than" = "greater")),
     actionButton("run_paired_ttest", "Run Paired t-test"),
-    verbatimTextOutput("paired_ttest_result"),
+    verbatimTextOutput("paired_ttest_result") %>% withSpinner(), # <-- Spinner Added
     hr(),
     with_info_popover(
       ui_element = h4("ANOVA (Analysis of Variance)"),
@@ -141,7 +132,7 @@ inferential_tab_ui <- accordion(
     uiOutput("select_anova_iv"),
     uiOutput("select_anova_iv2"),
     actionButton("run_anova", "Run ANOVA"),
-    verbatimTextOutput("anova_output")
+    verbatimTextOutput("anova_output") %>% withSpinner() # <-- Spinner Added
   ),
   
   # Panel 5: Non-Parametric Tests
@@ -156,7 +147,7 @@ inferential_tab_ui <- accordion(
     uiOutput("select_mw_variable"),
     uiOutput("select_mw_group"),
     actionButton("run_mw_test", "Run Mann-Whitney Test"),
-    verbatimTextOutput("mw_test_output"),
+    verbatimTextOutput("mw_test_output") %>% withSpinner(), # <-- Spinner Added
     
     hr(),
     
@@ -168,7 +159,7 @@ inferential_tab_ui <- accordion(
     uiOutput("select_kw_variable"),
     uiOutput("select_kw_group"),
     actionButton("run_kw_test", "Run Kruskal-Wallis Test"),
-    verbatimTextOutput("kw_test_output")
+    verbatimTextOutput("kw_test_output") %>% withSpinner() # <-- Spinner Added
   )
   
-) # This is the final closing parenthesis for the entire accordion()
+)
