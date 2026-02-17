@@ -1,34 +1,39 @@
-# 1. Base Image: Start with a version of R that has Shiny and the Tidyverse pre-installed
-# This saves huge amounts of build time.
-FROM rocker/shiny-verse:latest
+# 1. Base Image
+FROM --platform=linux/amd64 rocker/shiny-verse:latest
 
-# 2. System Libraries: Install Linux dependencies required by your specific packages
-# (devtools often needs these)
+# 2. System Libraries
 RUN apt-get update && apt-get install -y \
     libssl-dev \
-    libcurl4-gnutls-dev \
+    libcurl4-openssl-dev \
     libxml2-dev \
+    cmake \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
-# 3. Create App Directory
+# 3. Setup App Directory
 RUN mkdir -p /srv/shiny-server/openstats
-
-# 4. Copy renv files first (Caching layer)
-# This allows Docker to cache the library installation step if your code changes but libraries don't.
-COPY renv.lock /srv/shiny-server/openstats/
-COPY .Rprofile /srv/shiny-server/openstats/
-COPY renv/activate.R /srv/shiny-server/openstats/renv/
-
-# 5. Install R Packages using renv
 WORKDIR /srv/shiny-server/openstats
-# We restore the library. 
-RUN R -e "renv::restore(prompt = FALSE)"
 
-# 6. Copy the rest of the App Code
+# 4. Install correct renv version (The Fix)
+# We install 'remotes' and then use it to force-install renv 1.1.5.
+# We do this BEFORE copying .Rprofile so the auto-loader doesn't crash us.
+RUN R -e "install.packages('remotes', repos='https://cloud.r-project.org'); remotes::install_version('renv', '1.1.5', repos='https://cloud.r-project.org')"
+
+# 5. Copy renv configuration
+COPY renv.lock ./
+COPY renv/activate.R ./renv/
+COPY .Rprofile ./
+
+# 6. Restore Packages
+# Now that .Rprofile is copied, this will restore into the project library (renv/library).
+# We use the Posit Package Manager for binary speed, but we set a high timeout just in case.
+RUN R -e "options(timeout=300, repos = c(CRAN = 'https://packagemanager.posit.co/cran/__linux__/jammy/latest')); renv::restore(prompt = FALSE)"
+
+# 7. Copy the rest of the Application Code
 COPY . /srv/shiny-server/openstats/
 
-# 7. Expose the port (Shiny runs on 3838 by default in this image)
+# 8. Expose the port
 EXPOSE 3838
 
-# 8. Run the App
+# 9. Run the Application
 CMD ["R", "-e", "shiny::runApp('/srv/shiny-server/openstats', host = '0.0.0.0', port = 3838)"]

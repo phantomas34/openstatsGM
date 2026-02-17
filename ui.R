@@ -6,7 +6,7 @@ dark_theme <- bs_theme(version = 5, bootswatch = "darkly")
 
 ui <- page_sidebar(
   useShinyjs(),
-  title = "OpenStat Web App",
+  title = "OpenStats Web App",
   
   sidebar = sidebar(
     materialSwitch(inputId = "dark_mode_switch", label = "Dark Mode", status = "primary"),

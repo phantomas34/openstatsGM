@@ -1,9 +1,9 @@
-# Ignore the renv library, which is specific to the host machine
-renv/library/
-renv/staging/
-renv/temp/
-
-# Also ignore other user-specific files
-.Rproj.user/
+.Rproj.user
 .Rhistory
 .RData
+.git
+.gitignore
+manifest.json
+rsconnect
+renv/library
+renv/python
