@@ -1,4 +1,4 @@
-# ui.R (Complete Version with Regression Accordion)
+# ui.R (Complete Version with Descriptive Statistics Accordion)
 
 # --- bslib Theme Definitions ---
 light_theme <- bs_theme(version = 5)
@@ -6,7 +6,7 @@ dark_theme <- bs_theme(version = 5, bootswatch = "darkly")
 
 ui <- page_sidebar(
   useShinyjs(),
-  title = "OpenStats Web App",
+  title = "OpenStat Web App",
   
   sidebar = sidebar(
     materialSwitch(inputId = "dark_mode_switch", label = "Dark Mode", status = "primary"),
@@ -47,10 +47,12 @@ ui <- page_sidebar(
                    )
   ),
   
+  # --- START: Updated Descriptive Statistics Panel (Accordion Layout) ---
   conditionalPanel("input.main_nav == 'Descriptive Statistics'",
                    tagList(
                      h2("Descriptive Statistics"),
                      
+                     # Control Panel & Summary Table (Keep these visible at top)
                      layout_columns(
                        col_widths = c(4, 8),
                        card(
@@ -65,83 +67,104 @@ ui <- page_sidebar(
                        )
                      ),
                      
-                     layout_columns(
-                       col_widths = c(6, 6),
-                       card(
-                         card_header("Histogram"),
-                         checkboxInput("show_mean_median", "Plot Mean and Median", value = TRUE),
-                         numericInput("hist_bins", "Number of Bins", value = 30, min = 5, max = 100),
-                         selectInput("hist_yaxis_type", "Y-Axis Represents:",
-                                     choices = c("Count (Frequency)" = "count",
-                                                 "Percent" = "percent")),
-                         plotOutput("histogram_plot") %>% withSpinner()
+                     # Visualizations in Full-Width Accordion
+                     accordion(
+                       id = "descriptive_accordion",
+                       open = "Histogram", # Open Histogram by default
+                       
+                       # Panel 1: Histogram (Full Width for Faceting)
+                       accordion_panel(
+                         title = "Histogram",
+                         icon = bsicons::bs_icon("bar-chart-fill"),
+                         layout_columns(
+                           col_widths = c(3, 9), # Controls on left, Big plot on right
+                           card_body(
+                             checkboxInput("show_mean_median", "Plot Mean and Median", value = TRUE),
+                             numericInput("hist_bins", "Number of Bins", value = 30, min = 5, max = 100),
+                             selectInput("hist_yaxis_type", "Y-Axis Represents:",
+                                         choices = c("Count (Frequency)" = "count",
+                                                     "Percent" = "percent"))
+                           ),
+                           plotOutput("histogram_plot", height = "500px") %>% withSpinner() # Increased height
+                         )
                        ),
-                       card(
-                         card_header("Box Plot"),
-                         plotOutput("boxplot_plot") %>% withSpinner()
-                       )
-                     ),
-                     
-                     layout_columns(
-                       col_widths = c(6, 6),
-                       card(
-                         card_header("Density Plot"),
-                         plotOutput("density_plot") %>% withSpinner()
+                       
+                       # Panel 2: Box Plot (Full Width)
+                       accordion_panel(
+                         title = "Box Plot",
+                         icon = bsicons::bs_icon("box-seam"),
+                         plotOutput("boxplot_plot", height = "500px") %>% withSpinner()
                        ),
-                       card(
-                         card_header("Pie Chart"),
-                         plotOutput("pie_chart_plot") %>% withSpinner()
-                       )
-                     ),
-                     
-                     layout_columns(
-                       col_widths = 12,
-                       card(
-                         card_header("Bar Chart (for Categorical Data)"),
-                         selectInput("barchart_yaxis_type", "Y-Axis Represents:",
-                                     choices = c("Count (Frequency)" = "count",
-                                                 "Proportion (Relative Frequency)" = "proportion")),
-                         plotOutput("barchart_plot") %>% withSpinner()
-                       )
-                     ),
-                     
-                     layout_columns(
-                       col_widths = c(6, 6),
-                       card(
-                         card_header("Scatter Plot"),
-                         uiOutput("select_scatter_x"),
-                         uiOutput("select_scatter_y"),
-                         actionButton("generate_scatter", "Generate Scatter Plot"),
-                         plotOutput("scatter_plot") %>% withSpinner()
+                       
+                       # Panel 3: Density Plot (Full Width for Faceting)
+                       accordion_panel(
+                         title = "Density Plot",
+                         icon = bsicons::bs_icon("graph-up"),
+                         plotOutput("density_plot", height = "500px") %>% withSpinner()
                        ),
-                       card(
-                         card_header("Dot Plot"),
-                         uiOutput("select_dot_plot_variable"),
-                         actionButton("generate_dot_plot", "Generate Dot Plot"),
-                         downloadButton("download_dot_plot", "Download Plot"),
-                         plotOutput("dot_plot") %>% withSpinner()
+                       
+                       # Panel 4: Categorical Plots (Side-by-Side is okay here)
+                       accordion_panel(
+                         title = "Categorical Plots (Bar & Pie)",
+                         icon = bsicons::bs_icon("pie-chart-fill"),
+                         layout_columns(
+                           col_widths = c(6, 6),
+                           card(
+                             card_header("Bar Chart"),
+                             selectInput("barchart_yaxis_type", "Y-Axis Represents:",
+                                         choices = c("Count (Frequency)" = "count",
+                                                     "Proportion (Relative Frequency)" = "proportion")),
+                             plotOutput("barchart_plot") %>% withSpinner()
+                           ),
+                           card(
+                             card_header("Pie Chart"),
+                             plotOutput("pie_chart_plot") %>% withSpinner()
+                           )
+                         )
+                       ),
+                       
+                       # Panel 5: Numeric Correlation (Scatter & Dot)
+                       accordion_panel(
+                         title = "Numeric Relationship (Scatter & Dot)",
+                         icon = bsicons::bs_icon("diagram-3-fill"),
+                         layout_columns(
+                           col_widths = c(6, 6),
+                           card(
+                             card_header("Scatter Plot"),
+                             uiOutput("select_scatter_x"),
+                             uiOutput("select_scatter_y"),
+                             actionButton("generate_scatter", "Generate Scatter Plot"),
+                             plotOutput("scatter_plot") %>% withSpinner()
+                           ),
+                           card(
+                             card_header("Dot Plot"),
+                             uiOutput("select_dot_plot_variable"),
+                             actionButton("generate_dot_plot", "Generate Dot Plot"),
+                             downloadButton("download_dot_plot", "Download Plot"),
+                             plotOutput("dot_plot") %>% withSpinner()
+                           )
+                         )
                        )
                      )
                    ) 
   ),
+  # --- END: Updated Descriptive Statistics Panel ---
   
   conditionalPanel("input.main_nav == 'Inferential Statistics'",
                    h2("Inferential Statistics"),
                    inferential_tab_ui 
   ),
   
-  # --- START: Updated Regression & Correlation Panel (Accordion Layout) ---
   conditionalPanel("input.main_nav == 'Regression & Correlation'",
                    h2("Regression and Correlation"),
                    
                    accordion(
                      id = "regression_accordion",
-                     open = "Linear Regression", # Open the first panel by default
+                     open = "Linear Regression", 
                      
-                     # Panel 1: Linear Regression
                      accordion_panel(
                        title = "Linear Regression",
-                       icon = bsicons::bs_icon("graph-up"), # Optional icon
+                       icon = bsicons::bs_icon("graph-up"),
                        layout_columns(
                          col_widths = c(4, 8), 
                          card_body(
@@ -161,10 +184,9 @@ ui <- page_sidebar(
                        )
                      ),
                      
-                     # Panel 2: Logistic Regression
                      accordion_panel(
                        title = "Logistic Regression",
-                       icon = bsicons::bs_icon("diagram-2"), # Optional icon
+                       icon = bsicons::bs_icon("diagram-2"),
                        card_body(
                          with_info_popover(
                            ui_element = p("Use for modeling a binary outcome (e.g., Yes/No, 1/0)."),
@@ -185,17 +207,15 @@ ui <- page_sidebar(
                        )
                      ),
                      
-                     # Panel 3: Correlation Matrix
                      accordion_panel(
                        title = "Correlation Matrix",
-                       icon = bsicons::bs_icon("grid-3x3"), # Optional icon
+                       icon = bsicons::bs_icon("grid-3x3"), 
                        uiOutput("select_correlation_vars"),
                        actionButton("run_correlation", "Calculate Correlation"),
                        verbatimTextOutput("correlation_matrix") %>% withSpinner()
                      )
                    )
   ),
-  # --- END: Updated Regression & Correlation Panel ---
   
   conditionalPanel("input.main_nav == 'Probability'",
                    h2("Probability Distributions and Calculations"),

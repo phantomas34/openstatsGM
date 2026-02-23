@@ -1,4 +1,4 @@
-# server.R (Complete Corrected Version with Faceting)
+# server.R (Updated with Auto-Scaling Visuals)
 
 server <- function(input, output, session) {
   
@@ -329,241 +329,256 @@ server <- function(input, output, session) {
   })
   
   
-  # --- START: ROBUST REPLACEMENT for Descriptive Statistics Logic (with Faceting) ---
-  observeEvent(input$analyze_descriptive, {
+  # --- START: OPTIMIZED Descriptive Statistics Logic with bindEvent ---
+  
+  # --- Summary Statistics Table ---
+  output$summary_stats_output <- renderDT({
+    df <- data_r()
+    req(df, input$descriptive_variable, input$descriptive_variable %in% names(df))
     
-    # --- Summary Statistics Table ---
-    output$summary_stats_output <- renderDT({
-      df <- data_r()
-      req(df, input$descriptive_variable, input$descriptive_variable %in% names(df))
-      var_name <- input$descriptive_variable
-      group_var <- input$group_by_variable
+    var_name <- input$descriptive_variable
+    group_var <- input$group_by_variable
+    
+    if (var_name == "") return(NULL)
+    
+    # Use a strict definition for categorical for this specific output
+    is_strictly_categorical <- is.character(df[[var_name]]) || is.factor(df[[var_name]])
+    
+    # Use the smarter "categorical-like" definition for grouping variables
+    is_categorical_like <- function(vec) {
+      is.character(vec) || is.factor(vec) || (is.numeric(vec) && length(unique(na.omit(vec))) < 15)
+    }
+    
+    if (group_var != "None" && group_var %in% names(df)) {
+      group_is_cat_like <- is_categorical_like(df[[group_var]])
       
-      if (var_name == "") return(NULL)
-      
-      is_strictly_categorical <- is.character(df[[var_name]]) || is.factor(df[[var_name]])
-      is_categorical_like <- function(vec) { is.character(vec) || is.factor(vec) || (is.numeric(vec) && length(unique(na.omit(vec))) < 15) }
-      
-      if (group_var != "None" && group_var %in% names(df)) {
-        group_is_cat_like <- is_categorical_like(df[[group_var]])
-        if (is_strictly_categorical && group_is_cat_like) {
-          tbl <- table(df[[var_name]], df[[group_var]], dnn = c(var_name, group_var))
-          datatable(as.data.frame.matrix(addmargins(tbl)), options = list(dom = 't'), rownames = TRUE, caption = 'Two-Way Contingency Table (Counts)')
-        } else if (is.numeric(df[[var_name]]) && group_is_cat_like) {
-          grouped_summary <- df %>%
-            group_by(.data[[group_var]]) %>%
-            summarise(
-              N = sum(!is.na(.data[[var_name]])),
-              Mean = round(mean(.data[[var_name]], na.rm = TRUE), 2),
-              Median = round(median(.data[[var_name]], na.rm = TRUE), 2),
-              SD = round(sd(.data[[var_name]], na.rm = TRUE), 2),
-              Min = round(min(.data[[var_name]], na.rm = TRUE), 2),
-              Q1 = round(quantile(.data[[var_name]], 0.25, na.rm = TRUE), 2),
-              Q3 = round(quantile(.data[[var_name]], 0.75, na.rm = TRUE), 2),
-              Max = round(max(.data[[var_name]], na.rm = TRUE), 2)
-            )
-          datatable(grouped_summary, options = list(dom = 't'), rownames = FALSE, caption = 'Descriptive Statistics (Grouped)')
-        } else {
-          datatable(data.frame(Message = "This combination is not supported."), options = list(dom = 't'))
-        }
-      } else {
-        if (is_strictly_categorical) {
-          summary_table <- df %>%
-            filter(!is.na(.data[[var_name]])) %>%
-            count(.data[[var_name]], name = "Frequency") %>%
-            mutate(Relative_Frequency = scales::percent(Frequency / sum(Frequency), accuracy = 0.1))
-          datatable(summary_table, options = list(dom = 't'), rownames = FALSE, caption = 'Frequency Distribution Table')
-        } else {
-          summary_df <- data.frame(
-            Statistic = c("N", "Mean", "Median", "SD", "Min", "Q1", "Q3", "Max"),
-            Value = c(
-              sum(!is.na(df[[var_name]])), round(mean(df[[var_name]], na.rm = TRUE), 2),
-              round(median(df[[var_name]], na.rm = TRUE), 2), round(sd(df[[var_name]], na.rm = TRUE), 2),
-              round(min(df[[var_name]], na.rm = TRUE), 2), round(quantile(df[[var_name]], 0.25, na.rm = TRUE), 2),
-              round(quantile(df[[var_name]], 0.75, na.rm = TRUE), 2), round(max(df[[var_name]], na.rm = TRUE), 2)
-            )
+      if (is_strictly_categorical && group_is_cat_like) {
+        # Two categorical variables -> Two-Way Table
+        tbl <- table(df[[var_name]], df[[group_var]], dnn = c(var_name, group_var))
+        tbl_with_margins <- addmargins(tbl)
+        datatable(as.data.frame.matrix(tbl_with_margins), options = list(dom = 't'), rownames = TRUE, caption = 'Two-Way Contingency Table (Counts)')
+      } else if (is.numeric(df[[var_name]]) && group_is_cat_like) {
+        # Numeric grouped by categorical -> Grouped Summary
+        grouped_summary <- df %>%
+          group_by(.data[[group_var]]) %>%
+          summarise(
+            N = sum(!is.na(.data[[var_name]])),
+            Mean = round(mean(.data[[var_name]], na.rm = TRUE), 2),
+            Median = round(median(.data[[var_name]], na.rm = TRUE), 2),
+            SD = round(sd(.data[[var_name]], na.rm = TRUE), 2),
+            Min = round(min(.data[[var_name]], na.rm = TRUE), 2),
+            Q1 = round(quantile(.data[[var_name]], 0.25, na.rm = TRUE), 2),
+            Q3 = round(quantile(.data[[var_name]], 0.75, na.rm = TRUE), 2),
+            Max = round(max(.data[[var_name]], na.rm = TRUE), 2)
           )
-          datatable(summary_df, options = list(dom = 't'), rownames = FALSE, caption = 'Descriptive Statistics')
-        }
-      }
-    }, server = FALSE)
-    
-    # --- Histogram (with Faceting) ---
-    output$histogram_plot <- renderPlot({
-      df <- data_r()
-      req(df, input$descriptive_variable, input$descriptive_variable %in% names(df))
-      var <- input$descriptive_variable
-      group_var <- input$group_by_variable
-      validate(need(is.numeric(df[[var]]), "Histogram requires a quantitative (numeric) variable."))
-      
-      y_formatter <- if (input$hist_yaxis_type == "percent") scales::percent_format(accuracy = 1) else NULL
-      y_axis_label <- if (input$hist_yaxis_type == "percent") "Percent" else "Count (Frequency)"
-      
-      gg <- ggplot(df, aes(x = .data[[var]]))
-      
-      if (input$hist_yaxis_type == "percent") {
-        gg <- gg + geom_histogram(aes(y = after_stat(count / sum(count))), bins = input$hist_bins, fill = "steelblue", color = "white")
+        datatable(grouped_summary, options = list(dom = 't'), rownames = FALSE, caption = 'Descriptive Statistics (Grouped)')
       } else {
-        gg <- gg + geom_histogram(bins = input$hist_bins, fill = "steelblue", color = "white")
+        datatable(data.frame(Message = "This combination is not supported."), options = list(dom = 't'))
       }
-      
-      gg <- gg + scale_y_continuous(labels = y_formatter)
-      
-      if (group_var != "None" && group_var %in% names(df)) {
-        gg <- gg + facet_wrap(vars(.data[[group_var]]), scales = "free_y") +
-          labs(title = paste("Histogram of", var, "by", group_var), x = var, y = y_axis_label)
-        
-        if (isTRUE(input$show_mean_median)) {
-          summary_lines <- df %>%
-            group_by(.data[[group_var]]) %>%
-            summarise(mean_val = mean(.data[[var]], na.rm = TRUE),
-                      median_val = median(.data[[var]], na.rm = TRUE))
-          
-          gg <- gg +
-            geom_vline(data = summary_lines, aes(xintercept = mean_val), color = "red", linetype = "dashed") +
-            geom_vline(data = summary_lines, aes(xintercept = median_val), color = "green", linetype = "dashed")
-        }
+    } else {
+      if (is_strictly_categorical) {
+        # One categorical variable -> Frequency Table
+        summary_table <- df %>%
+          filter(!is.na(.data[[var_name]])) %>%
+          count(.data[[var_name]], name = "Frequency") %>%
+          mutate(Relative_Frequency = scales::percent(Frequency / sum(Frequency), accuracy = 0.1))
+        datatable(summary_table, options = list(dom = 't'), rownames = FALSE, caption = 'Frequency Distribution Table')
       } else {
-        gg <- gg + labs(title = paste("Histogram of", var), x = var, y = y_axis_label)
-        if (isTRUE(input$show_mean_median)) {
-          gg <- gg +
-            geom_vline(aes(xintercept = mean(df[[var]], na.rm = TRUE)), color = "red", linetype = "dashed") +
-            geom_vline(aes(xintercept = median(df[[var]], na.rm = TRUE)), color = "green", linetype = "dashed")
-        }
-      }
-      gg
-    })
-    
-    # --- Box Plot ---
-    output$boxplot_plot <- renderPlot({
-      df <- data_r()
-      req(df, input$descriptive_variable, input$descriptive_variable %in% names(df))
-      var_name <- input$descriptive_variable
-      group_var <- input$group_by_variable
-      if (is.numeric(df[[var_name]])) {
-        if (group_var != "None" && group_var %in% names(df) && (is.character(df[[group_var]]) || is.factor(df[[group_var]]))) {
-          ggplot(df, aes(x = as.factor(.data[[group_var]]), y = .data[[var_name]], fill = as.factor(.data[[group_var]]))) +
-            geom_boxplot() + labs(title = paste("Boxplot of", var_name, "by", group_var), x = group_var, y = var_name) + theme(legend.position = "none")
-        } else {
-          ggplot(df, aes(y = .data[[var_name]])) +
-            geom_boxplot(fill = "lightgreen") + labs(title = paste("Boxplot of", var_name), y = var_name, x = NULL) + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
-        }
-      } else {
-        ggplot() + annotate("text", x = 0, y = 0, label = "Box plot requires a numeric variable.", size = 5) + theme_void()
-      }
-    })
-    
-    # --- Density Plot (with Faceting) ---
-    output$density_plot <- renderPlot({
-      df <- data_r()
-      req(df, input$descriptive_variable, input$descriptive_variable %in% names(df))
-      var <- input$descriptive_variable
-      group_var <- input$group_by_variable
-      validate(need(is.numeric(df[[var]]), "Density plot requires a numeric variable."))
-      
-      if (group_var != "None" && group_var %in% names(df)) {
-        ggplot(df, aes(x = .data[[var]])) +
-          geom_density(fill = "blue", alpha = 0.4) +
-          facet_wrap(vars(.data[[group_var]]), scales = "free_y") +
-          labs(title = paste("Density Plot of", var, "by", group_var), x = var, y = "Density")
-      } else {
-        ggplot(df, aes(x = .data[[var]])) +
-          geom_density(fill = "blue", alpha = 0.4) +
-          labs(title = paste("Density Plot of", var), x = var, y = "Density")
-      }
-    })
-    
-    # --- Pie Chart ---
-    output$pie_chart_plot <- renderPlot({
-      df <- data_r()
-      req(df, input$descriptive_variable, input$descriptive_variable %in% names(df))
-      var_name <- input$descriptive_variable
-      validate(need(!is.numeric(df[[var_name]]), "Pie chart requires a categorical variable."))
-      
-      df_summary <- df %>%
-        filter(!is.na(.data[[var_name]])) %>%
-        count(.data[[var_name]], name = "Count") %>%
-        mutate(
-          Percentage = Count / sum(Count),
-          Label = paste0(round(Percentage * 100, 1), "%")
+        # Any other type (including numeric) -> Descriptive Stats Table
+        summary_df <- data.frame(
+          Statistic = c("N", "Mean", "Median", "SD", "Min", "Q1", "Q3", "Max"),
+          Value = c(
+            sum(!is.na(df[[var_name]])),
+            round(mean(df[[var_name]], na.rm = TRUE), 2),
+            round(median(df[[var_name]], na.rm = TRUE), 2),
+            round(sd(df[[var_name]], na.rm = TRUE), 2),
+            round(min(df[[var_name]], na.rm = TRUE), 2),
+            round(quantile(df[[var_name]], 0.25, na.rm = TRUE), 2),
+            round(quantile(df[[var_name]], 0.75, na.rm = TRUE), 2),
+            round(max(df[[var_name]], na.rm = TRUE), 2)
+          )
         )
-      ggplot(df_summary, aes(x = "", y = Percentage, fill = as.factor(.data[[var_name]]))) +
-        geom_col(width = 1) +
-        coord_polar(theta = "y") +
-        geom_text(aes(label = Label), position = position_stack(vjust = 0.5), color = "white", size = 4) +
-        theme_void() +
-        labs(title = paste("Pie Chart of", var_name), fill = var_name)
-    })
+        datatable(summary_df, options = list(dom = 't'), rownames = FALSE, caption = 'Descriptive Statistics')
+      }
+    }
+  }, server = FALSE) %>% bindEvent(input$analyze_descriptive)
+  
+  # --- Histogram (Fixed to Auto-Scale) ---
+  output$histogram_plot <- renderPlot({
+    df <- data_r()
+    req(df, input$descriptive_variable, input$descriptive_variable %in% names(df))
+    var <- input$descriptive_variable
     
-    # --- Bar Chart ---
-    output$barchart_plot <- renderPlot({
-      df <- data_r()
-      req(df, input$descriptive_variable, input$descriptive_variable %in% names(df))
-      var_name <- input$descriptive_variable
-      validate(need(is.character(df[[var_name]]) || is.factor(df[[var_name]]), "Bar chart is for categorical (text) variables only."))
+    validate(need(is.numeric(df[[var]]), "Histogram requires a quantitative (numeric) variable."))
+    
+    group_var <- input$group_by_variable
+    y_formatter <- if (input$hist_yaxis_type == "percent") scales::percent_format(accuracy = 1) else NULL
+    y_axis_label <- if (input$hist_yaxis_type == "percent") "Percent" else "Count (Frequency)"
+    
+    gg <- ggplot(df, aes(x = .data[[var]]))
+    
+    if (input$hist_yaxis_type == "percent") {
+      gg <- gg + geom_histogram(aes(y = after_stat(count / sum(count))), bins = input$hist_bins, fill = "steelblue", color = "white")
+    } else {
+      gg <- gg + geom_histogram(bins = input$hist_bins, fill = "steelblue", color = "white")
+    }
+    
+    gg <- gg + scale_y_continuous(labels = y_formatter)
+    
+    if (group_var != "None" && group_var %in% names(df)) {
+      # --- UPDATED: scales = "free" for autoscaling ---
+      gg <- gg + facet_wrap(vars(.data[[group_var]]), scales = "free") +
+        labs(title = paste("Histogram of", var, "by", group_var), x = var, y = y_axis_label)
       
-      df_summary <- df %>%
-        filter(!is.na(.data[[var_name]])) %>%
-        count(.data[[var_name]], name = "Frequency") %>%
-        mutate(Proportion = Frequency / sum(Frequency))
-      
-      y_axis_var <- if (input$barchart_yaxis_type == "proportion") "Proportion" else "Frequency"
-      y_axis_label <- if (input$barchart_yaxis_type == "proportion") "Relative Frequency" else "Count"
-      
-      gg <- ggplot(df_summary, aes(x = as.factor(.data[[var_name]]), y = .data[[y_axis_var]])) +
-        geom_col(fill = "cornflowerblue") +
-        labs(title = paste("Bar Chart of", var_name), x = var_name, y = y_axis_label)
-      
-      if (input$barchart_yaxis_type == "proportion") {
-        gg <- gg + scale_y_continuous(labels = scales::percent)
+      if (isTRUE(input$show_mean_median)) {
+        summary_lines <- df %>%
+          group_by(.data[[group_var]]) %>%
+          summarise(mean_val = mean(.data[[var]], na.rm = TRUE),
+                    median_val = median(.data[[var]], na.rm = TRUE))
+        
+        gg <- gg +
+          geom_vline(data = summary_lines, aes(xintercept = mean_val), color = "red", linetype = "dashed") +
+          geom_vline(data = summary_lines, aes(xintercept = median_val), color = "green", linetype = "dashed")
       }
-      gg
-    })
-  })
-  # --- END ROBUST REPLACEMENT ---
+    } else {
+      gg <- gg + labs(title = paste("Histogram of", var), x = var, y = y_axis_label)
+      if (isTRUE(input$show_mean_median)) {
+        gg <- gg +
+          geom_vline(aes(xintercept = mean(df[[var]], na.rm = TRUE)), color = "red", linetype = "dashed") +
+          geom_vline(aes(xintercept = median(df[[var]], na.rm = TRUE)), color = "green", linetype = "dashed")
+      }
+    }
+    gg
+  }) %>% bindEvent(input$analyze_descriptive)
   
-  observeEvent(input$generate_scatter, {
-    output$scatter_plot <- renderPlot({
-      df <- data_r()
-      req(df, input$scatter_x, input$scatter_y, input$scatter_x %in% names(df), input$scatter_y %in% names(df))
-      x_var <- input$scatter_x
-      y_var <- input$scatter_y
-      
-      validate(
-        need(is.numeric(df[[x_var]]) && is.numeric(df[[y_var]]), "Scatter plots require numeric variables.")
+  # --- Box Plot ---
+  output$boxplot_plot <- renderPlot({
+    df <- data_r()
+    req(df, input$descriptive_variable, input$descriptive_variable %in% names(df))
+    var_name <- input$descriptive_variable
+    group_var <- input$group_by_variable
+    
+    if (is.numeric(df[[var_name]])) {
+      if (group_var != "None" && group_var %in% names(df) && (is.character(df[[group_var]]) || is.factor(df[[group_var]]))) {
+        ggplot(df, aes(x = as.factor(.data[[group_var]]), y = .data[[var_name]], fill = as.factor(.data[[group_var]]))) +
+          geom_boxplot() + labs(title = paste("Boxplot of", var_name, "by", group_var), x = group_var, y = var_name) + theme(legend.position = "none")
+      } else {
+        ggplot(df, aes(y = .data[[var_name]])) +
+          geom_boxplot(fill = "lightgreen") + labs(title = paste("Boxplot of", var_name), y = var_name, x = NULL) + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+      }
+    } else {
+      ggplot() + annotate("text", x = 0, y = 0, label = "Box plot requires a numeric variable.", size = 5) + theme_void()
+    }
+  }) %>% bindEvent(input$analyze_descriptive)
+  
+  # --- Density Plot (Fixed to Auto-Scale) ---
+  output$density_plot <- renderPlot({
+    df <- data_r()
+    req(df, input$descriptive_variable, input$descriptive_variable %in% names(df))
+    var <- input$descriptive_variable
+    group_var <- input$group_by_variable
+    validate(need(is.numeric(df[[var]]), "Density plot requires a numeric variable."))
+    
+    if (group_var != "None" && group_var %in% names(df)) {
+      # --- UPDATED: scales = "free" for autoscaling ---
+      ggplot(df, aes(x = .data[[var]])) +
+        geom_density(fill = "blue", alpha = 0.4) +
+        facet_wrap(vars(.data[[group_var]]), scales = "free") +
+        labs(title = paste("Density Plot of", var, "by", group_var), x = var, y = "Density")
+    } else {
+      ggplot(df, aes(x = .data[[var]])) +
+        geom_density(fill = "blue", alpha = 0.4) +
+        labs(title = paste("Density Plot of", var), x = var, y = "Density")
+    }
+  }) %>% bindEvent(input$analyze_descriptive)
+  
+  # --- Pie Chart ---
+  output$pie_chart_plot <- renderPlot({
+    df <- data_r()
+    req(df, input$descriptive_variable, input$descriptive_variable %in% names(df))
+    var_name <- input$descriptive_variable
+    validate(need(!is.numeric(df[[var_name]]), "Pie chart requires a categorical variable."))
+    
+    df_summary <- df %>%
+      filter(!is.na(.data[[var_name]])) %>%
+      count(.data[[var_name]], name = "Count") %>%
+      mutate(
+        Percentage = Count / sum(Count),
+        Label = paste0(round(Percentage * 100, 1), "%")
       )
-      
-      ggplot(df, aes(x = .data[[x_var]], y = .data[[y_var]])) +
-        geom_point(color = "darkblue") +
-        labs(title = paste("Scatter Plot of", y_var, "vs", x_var), x = x_var, y = y_var)
-    })
-  })
+    ggplot(df_summary, aes(x = "", y = Percentage, fill = as.factor(.data[[var_name]]))) +
+      geom_col(width = 1) +
+      coord_polar(theta = "y") +
+      geom_text(aes(label = Label), position = position_stack(vjust = 0.5), color = "white", size = 4) +
+      theme_void() +
+      labs(title = paste("Pie Chart of", var_name), fill = var_name)
+  }) %>% bindEvent(input$analyze_descriptive)
   
-  observeEvent(input$generate_dot_plot, {
-    output$dot_plot <- renderPlot({
-      df <- data_r()
-      req(df, input$dot_plot_variable, input$dot_plot_variable %in% names(df))
-      var <- input$dot_plot_variable
-      validate(need(is.numeric(df[[var]]), "Dot plot requires a numeric variable."))
-      
-      data_vec <- na.omit(df[[var]])
-      
-      if (length(data_vec) < 2) {
-        return(ggplot() + annotate("text", x=0,y=0, label="Not enough data for dot plot.") + theme_void())
-      }
-      
-      data_range <- max(data_vec) - min(data_vec)
-      dynamic_binwidth <- if (data_range == 0) 1 else data_range / 30
-      
-      p <- ggplot(df, aes(x = .data[[var]])) +
-        geom_dotplot(binaxis = 'x', stackdir = 'up', dotsize = 0.8, fill = "steelblue", binwidth = dynamic_binwidth) +
-        labs(title = paste("Dot Plot of", var), x = var, y = "Frequency") +
-        theme_light()
-      
-      current_dot_plot(p) 
-      p
-    })
-  })
+  # --- Bar Chart ---
+  output$barchart_plot <- renderPlot({
+    df <- data_r()
+    req(df, input$descriptive_variable, input$descriptive_variable %in% names(df))
+    var_name <- input$descriptive_variable
+    validate(need(is.character(df[[var_name]]) || is.factor(df[[var_name]]), "Bar chart is for categorical (text) variables only."))
+    
+    df_summary <- df %>%
+      filter(!is.na(.data[[var_name]])) %>%
+      count(.data[[var_name]], name = "Frequency") %>%
+      mutate(Proportion = Frequency / sum(Frequency))
+    
+    y_axis_var <- if (input$barchart_yaxis_type == "proportion") "Proportion" else "Frequency"
+    y_axis_label <- if (input$barchart_yaxis_type == "proportion") "Relative Frequency" else "Count"
+    
+    gg <- ggplot(df_summary, aes(x = as.factor(.data[[var_name]]), y = .data[[y_axis_var]])) +
+      geom_col(fill = "cornflowerblue") +
+      labs(title = paste("Bar Chart of", var_name), x = var_name, y = y_axis_label)
+    
+    if (input$barchart_yaxis_type == "proportion") {
+      gg <- gg + scale_y_continuous(labels = scales::percent)
+    }
+    gg
+  }) %>% bindEvent(input$analyze_descriptive)
+  
+  # --- END OPTIMIZED Descriptive Statistics Logic ---
+  
+  output$scatter_plot <- renderPlot({
+    df <- data_r()
+    req(df, input$scatter_x, input$scatter_y, input$scatter_x %in% names(df), input$scatter_y %in% names(df))
+    x_var <- input$scatter_x
+    y_var <- input$scatter_y
+    
+    validate(
+      need(is.numeric(df[[x_var]]) && is.numeric(df[[y_var]]), "Scatter plots require numeric variables.")
+    )
+    
+    ggplot(df, aes(x = .data[[x_var]], y = .data[[y_var]])) +
+      geom_point(color = "darkblue") +
+      labs(title = paste("Scatter Plot of", y_var, "vs", x_var), x = x_var, y = y_var)
+  }) %>% bindEvent(input$generate_scatter)
+  
+  output$dot_plot <- renderPlot({
+    df <- data_r()
+    req(df, input$dot_plot_variable, input$dot_plot_variable %in% names(df))
+    var <- input$dot_plot_variable
+    validate(need(is.numeric(df[[var]]), "Dot plot requires a numeric variable."))
+    
+    data_vec <- na.omit(df[[var]])
+    
+    if (length(data_vec) < 2) {
+      return(ggplot() + annotate("text", x=0,y=0, label="Not enough data for dot plot.") + theme_void())
+    }
+    
+    data_range <- max(data_vec) - min(data_vec)
+    dynamic_binwidth <- if (data_range == 0) 1 else data_range / 30
+    
+    p <- ggplot(df, aes(x = .data[[var]])) +
+      geom_dotplot(binaxis = 'x', stackdir = 'up', dotsize = 0.8, fill = "steelblue", binwidth = dynamic_binwidth) +
+      labs(title = paste("Dot Plot of", var), x = var, y = "Frequency") +
+      theme_light()
+    
+    current_dot_plot(p) 
+    p
+  }) %>% bindEvent(input$generate_dot_plot)
   
   output$download_dot_plot <- downloadHandler(
     filename = function() { paste("dot-plot-", Sys.Date(), ".png", sep = "") },
@@ -752,9 +767,6 @@ server <- function(input, output, session) {
     })
   })
   
-  # --- START: FINAL UPGRADED REPLACEMENT for observeEvent(input$run_ht, ...) ---
-  # This version adds the sample size(s) 'n' to the t-test outputs.
-  
   observeEvent(input$run_ht, {
     req(data_r(), input$ht_variable)
     df <- data_r()
@@ -769,7 +781,6 @@ server <- function(input, output, session) {
     
     output$ht_output <- renderPrint({
       if (!is.null(group_var) && group_var != "None" && group_var %in% names(df)) {
-        # --- TWO-SAMPLE T-TEST LOGIC ---
         df_filtered <- df %>% filter(!is.na(.data[[var_name]]), !is.na(.data[[group_var]]))
         df_filtered[[group_var]] <- as.factor(df_filtered[[group_var]])
         
@@ -778,11 +789,10 @@ server <- function(input, output, session) {
           return()
         }
         
-        # --- NEW: Calculate n1 and n2 ---
+        # Calculate n1 and n2
         sample_sizes <- table(df_filtered[[group_var]])
         n1 <- sample_sizes[1]
         n2 <- sample_sizes[2]
-        # --- END NEW ---
         
         test_result <- t.test(as.formula(paste(var_name, "~", group_var)),
                               data = df_filtered,
@@ -799,15 +809,11 @@ server <- function(input, output, session) {
           cat("Two-Sample t-test (Welch's)\n----------------------------\n")
         }
         
-        # --- MODIFIED: Add sample sizes to output ---
         cat("Sample Sizes (n1, n2):", n1, ",", n2, "\n")
         cat("Standard Error of Difference:", round(se_diff, 4), "\n\n")
-        # --- END MODIFIED ---
-        
         print(test_result)
         
       } else {
-        # --- ONE-SAMPLE T-TEST LOGIC ---
         sample_data <- na.omit(df[[var_name]])
         test_result <- t.test(sample_data, mu = mu, alternative = input$ht_alternative)
         
@@ -816,80 +822,61 @@ server <- function(input, output, session) {
         se <- s / sqrt(n)
         
         cat("One-Sample t-test\n-----------------\n")
-        # --- MODIFIED: Add sample size to output ---
         cat("Sample Size (n):", n, "\n")
         cat("Sample Mean:", round(test_result$estimate, 4), "\n")
         cat("Standard Error:", round(se, 4), "\n\n")
-        # --- END MODIFIED ---
-        
         print(test_result)
       }
     })
   })
   
-  # --- END OF REPLACEMENT ---d
-  
-# --- START: UPGRADED REPLACEMENT for observeEvent(input$run_paired_ttest, ...) ---
-# This version fixes the data usage bug and adds n and SE to the output.
-
-observeEvent(input$run_paired_ttest, {
-  df <- data_r()
-  req(df, input$paired_var1, input$paired_var2)
-  
-  var1 <- input$paired_var1
-  var2 <- input$paired_var2
-  
-  # --- Validation (unchanged) ---
-  if (var1 == var2) {
-    output$paired_ttest_result <- renderPrint({"Error: Please select two different variables."})
-    return(NULL)
-  }
-  
-  if (!is.numeric(df[[var1]]) || !is.numeric(df[[var2]])) {
-    output$paired_ttest_result <- renderPrint({"Both variables must be numeric."})
-    return(NULL)
-  }
-  
-  # --- BUG FIX Part 1: Correctly use df_clean ---
-  # Create a clean data frame with only complete pairs
-  df_clean <- df %>% select(all_of(c(var1, var2))) %>% na.omit()
-  
-  if (nrow(df_clean) < 2) {
-    output$paired_ttest_result <- renderPrint({"Not enough complete data pairs for a paired t-test."})
-    return(NULL)
-  }
-  
-  # --- NEW FEATURE: Calculate n and SE ---
-  n_pairs <- nrow(df_clean)
-  differences <- df_clean[[var1]] - df_clean[[var2]]
-  se_of_diff <- sd(differences) / sqrt(n_pairs)
-  # --- END NEW FEATURE ---
-  
-  # --- BUG FIX Part 2: Use the cleaned data in the test ---
-  test <- t.test(df_clean[[var1]], df_clean[[var2]], paired = TRUE, alternative = input$paired_alternative)
-  
-  output$paired_ttest_result <- renderPrint({
+  observeEvent(input$run_paired_ttest, {
+    df <- data_r()
+    req(df, input$paired_var1, input$paired_var2)
     
-    # Capture the default R output
-    raw_output <- capture.output(print(test))
+    var1 <- input$paired_var1
+    var2 <- input$paired_var2
     
-    # --- NEW FEATURE: Clean up the "data:" line ---
-    # Find the line that starts with "data:" and replace it with a user-friendly version
-    data_line_index <- grep("data:", raw_output)
-    raw_output[data_line_index] <- paste("data: ", var1, "and", var2)
+    if (var1 == var2) {
+      output$paired_ttest_result <- renderPrint({"Error: Please select two different variables."})
+      return(NULL)
+    }
     
-    # --- Assemble the final, custom output ---
-    cat("Paired t-test\n")
-    cat("-----------------\n")
-    cat("Number of Pairs (n):", n_pairs, "\n")
-    cat("Standard Error of Mean Difference:", round(se_of_diff, 4), "\n\n")
+    if (!is.numeric(df[[var1]]) || !is.numeric(df[[var2]])) {
+      output$paired_ttest_result <- renderPrint({"Both variables must be numeric."})
+      return(NULL)
+    }
     
-    # Print the cleaned-up R output
-    cat(paste(raw_output, collapse = "\n"))
+    # Create a clean data frame with only complete pairs
+    df_clean <- df %>% select(all_of(c(var1, var2))) %>% na.omit()
+    
+    if (nrow(df_clean) < 2) {
+      output$paired_ttest_result <- renderPrint({"Not enough complete data pairs for a paired t-test."})
+      return(NULL)
+    }
+    
+    n_pairs <- nrow(df_clean)
+    differences <- df_clean[[var1]] - df_clean[[var2]]
+    se_of_diff <- sd(differences) / sqrt(n_pairs)
+    
+    test <- t.test(df_clean[[var1]], df_clean[[var2]], paired = TRUE, alternative = input$paired_alternative)
+    
+    output$paired_ttest_result <- renderPrint({
+      
+      # Capture the default R output
+      raw_output <- capture.output(print(test))
+      
+      # Clean up the "data:" line
+      data_line_index <- grep("data:", raw_output)
+      raw_output[data_line_index] <- paste("data: ", var1, "and", var2)
+      
+      cat("Paired t-test\n")
+      cat("-----------------\n")
+      cat("Number of Pairs (n):", n_pairs, "\n")
+      cat("Standard Error of Mean Difference:", round(se_of_diff, 4), "\n\n")
+      cat(paste(raw_output, collapse = "\n"))
+    })
   })
-})
-
-# --- END OF REPLACEMENT ---
   
   observeEvent(input$run_chi_sq, {
     
