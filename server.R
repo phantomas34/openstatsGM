@@ -1,4 +1,4 @@
-# server.R (Updated with Auto-Scaling Visuals)
+# server.R (Complete Version with Fixed Plot Validation & Faceting)
 
 server <- function(input, output, session) {
   
@@ -16,6 +16,13 @@ server <- function(input, output, session) {
   current_dot_plot <- reactiveVal(NULL)
   current_normal_plot <- reactiveVal(NULL)
   
+  # Reactive values to store the plots and table for the Download Report feature
+  desc_results <- reactiveValues(
+    hist = NULL,
+    box = NULL,
+    density = NULL,
+    summary = NULL
+  )
   
   # --- Data Input and Management Logic ---
   
@@ -329,7 +336,7 @@ server <- function(input, output, session) {
   })
   
   
-  # --- START: OPTIMIZED Descriptive Statistics Logic with bindEvent ---
+  # --- START: OPTIMIZED Descriptive Statistics Logic ---
   
   # --- Summary Statistics Table ---
   output$summary_stats_output <- renderDT({
@@ -341,25 +348,22 @@ server <- function(input, output, session) {
     
     if (var_name == "") return(NULL)
     
-    # Use a strict definition for categorical for this specific output
     is_strictly_categorical <- is.character(df[[var_name]]) || is.factor(df[[var_name]])
-    
-    # Use the smarter "categorical-like" definition for grouping variables
     is_categorical_like <- function(vec) {
       is.character(vec) || is.factor(vec) || (is.numeric(vec) && length(unique(na.omit(vec))) < 15)
     }
+    
+    final_summary_data <- NULL
     
     if (group_var != "None" && group_var %in% names(df)) {
       group_is_cat_like <- is_categorical_like(df[[group_var]])
       
       if (is_strictly_categorical && group_is_cat_like) {
-        # Two categorical variables -> Two-Way Table
         tbl <- table(df[[var_name]], df[[group_var]], dnn = c(var_name, group_var))
-        tbl_with_margins <- addmargins(tbl)
-        datatable(as.data.frame.matrix(tbl_with_margins), options = list(dom = 't'), rownames = TRUE, caption = 'Two-Way Contingency Table (Counts)')
+        final_summary_data <- as.data.frame.matrix(addmargins(tbl))
+        datatable(final_summary_data, options = list(dom = 't'), rownames = TRUE, caption = 'Two-Way Contingency Table (Counts)')
       } else if (is.numeric(df[[var_name]]) && group_is_cat_like) {
-        # Numeric grouped by categorical -> Grouped Summary
-        grouped_summary <- df %>%
+        final_summary_data <- df %>%
           group_by(.data[[group_var]]) %>%
           summarise(
             N = sum(!is.na(.data[[var_name]])),
@@ -371,21 +375,19 @@ server <- function(input, output, session) {
             Q3 = round(quantile(.data[[var_name]], 0.75, na.rm = TRUE), 2),
             Max = round(max(.data[[var_name]], na.rm = TRUE), 2)
           )
-        datatable(grouped_summary, options = list(dom = 't'), rownames = FALSE, caption = 'Descriptive Statistics (Grouped)')
+        datatable(final_summary_data, options = list(dom = 't'), rownames = FALSE, caption = 'Descriptive Statistics (Grouped)')
       } else {
         datatable(data.frame(Message = "This combination is not supported."), options = list(dom = 't'))
       }
     } else {
       if (is_strictly_categorical) {
-        # One categorical variable -> Frequency Table
-        summary_table <- df %>%
+        final_summary_data <- df %>%
           filter(!is.na(.data[[var_name]])) %>%
           count(.data[[var_name]], name = "Frequency") %>%
           mutate(Relative_Frequency = scales::percent(Frequency / sum(Frequency), accuracy = 0.1))
-        datatable(summary_table, options = list(dom = 't'), rownames = FALSE, caption = 'Frequency Distribution Table')
+        datatable(final_summary_data, options = list(dom = 't'), rownames = FALSE, caption = 'Frequency Distribution Table')
       } else {
-        # Any other type (including numeric) -> Descriptive Stats Table
-        summary_df <- data.frame(
+        final_summary_data <- data.frame(
           Statistic = c("N", "Mean", "Median", "SD", "Min", "Q1", "Q3", "Max"),
           Value = c(
             sum(!is.na(df[[var_name]])),
@@ -398,12 +400,13 @@ server <- function(input, output, session) {
             round(max(df[[var_name]], na.rm = TRUE), 2)
           )
         )
-        datatable(summary_df, options = list(dom = 't'), rownames = FALSE, caption = 'Descriptive Statistics')
+        datatable(final_summary_data, options = list(dom = 't'), rownames = FALSE, caption = 'Descriptive Statistics')
       }
     }
+    desc_results$summary <- final_summary_data
   }, server = FALSE) %>% bindEvent(input$analyze_descriptive)
   
-  # --- Histogram (Fixed to Auto-Scale) ---
+  # --- Histogram ---
   output$histogram_plot <- renderPlot({
     df <- data_r()
     req(df, input$descriptive_variable, input$descriptive_variable %in% names(df))
@@ -426,7 +429,6 @@ server <- function(input, output, session) {
     gg <- gg + scale_y_continuous(labels = y_formatter)
     
     if (group_var != "None" && group_var %in% names(df)) {
-      # --- UPDATED: scales = "free" for autoscaling ---
       gg <- gg + facet_wrap(vars(.data[[group_var]]), scales = "free") +
         labs(title = paste("Histogram of", var, "by", group_var), x = var, y = y_axis_label)
       
@@ -448,6 +450,7 @@ server <- function(input, output, session) {
           geom_vline(aes(xintercept = median(df[[var]], na.rm = TRUE)), color = "green", linetype = "dashed")
       }
     }
+    desc_results$hist <- gg
     gg
   }) %>% bindEvent(input$analyze_descriptive)
   
@@ -458,20 +461,23 @@ server <- function(input, output, session) {
     var_name <- input$descriptive_variable
     group_var <- input$group_by_variable
     
+    p <- NULL
     if (is.numeric(df[[var_name]])) {
       if (group_var != "None" && group_var %in% names(df) && (is.character(df[[group_var]]) || is.factor(df[[group_var]]))) {
-        ggplot(df, aes(x = as.factor(.data[[group_var]]), y = .data[[var_name]], fill = as.factor(.data[[group_var]]))) +
+        p <- ggplot(df, aes(x = as.factor(.data[[group_var]]), y = .data[[var_name]], fill = as.factor(.data[[group_var]]))) +
           geom_boxplot() + labs(title = paste("Boxplot of", var_name, "by", group_var), x = group_var, y = var_name) + theme(legend.position = "none")
       } else {
-        ggplot(df, aes(y = .data[[var_name]])) +
+        p <- ggplot(df, aes(y = .data[[var_name]])) +
           geom_boxplot(fill = "lightgreen") + labs(title = paste("Boxplot of", var_name), y = var_name, x = NULL) + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
       }
     } else {
-      ggplot() + annotate("text", x = 0, y = 0, label = "Box plot requires a numeric variable.", size = 5) + theme_void()
+      p <- ggplot() + annotate("text", x = 0, y = 0, label = "Box plot requires a numeric variable.", size = 5) + theme_void()
     }
+    desc_results$box <- p
+    p
   }) %>% bindEvent(input$analyze_descriptive)
   
-  # --- Density Plot (Fixed to Auto-Scale) ---
+  # --- Density Plot ---
   output$density_plot <- renderPlot({
     df <- data_r()
     req(df, input$descriptive_variable, input$descriptive_variable %in% names(df))
@@ -479,65 +485,141 @@ server <- function(input, output, session) {
     group_var <- input$group_by_variable
     validate(need(is.numeric(df[[var]]), "Density plot requires a numeric variable."))
     
+    p <- NULL
     if (group_var != "None" && group_var %in% names(df)) {
-      # --- UPDATED: scales = "free" for autoscaling ---
-      ggplot(df, aes(x = .data[[var]])) +
+      p <- ggplot(df, aes(x = .data[[var]])) +
         geom_density(fill = "blue", alpha = 0.4) +
         facet_wrap(vars(.data[[group_var]]), scales = "free") +
         labs(title = paste("Density Plot of", var, "by", group_var), x = var, y = "Density")
     } else {
-      ggplot(df, aes(x = .data[[var]])) +
+      p <- ggplot(df, aes(x = .data[[var]])) +
         geom_density(fill = "blue", alpha = 0.4) +
         labs(title = paste("Density Plot of", var), x = var, y = "Density")
     }
+    desc_results$density <- p
+    p
   }) %>% bindEvent(input$analyze_descriptive)
   
-  # --- Pie Chart ---
+  # --- Pie Chart (UPDATED VALIDATION) ---
   output$pie_chart_plot <- renderPlot({
     df <- data_r()
     req(df, input$descriptive_variable, input$descriptive_variable %in% names(df))
     var_name <- input$descriptive_variable
-    validate(need(!is.numeric(df[[var_name]]), "Pie chart requires a categorical variable."))
+    group_var <- input$group_by_variable
     
-    df_summary <- df %>%
-      filter(!is.na(.data[[var_name]])) %>%
-      count(.data[[var_name]], name = "Count") %>%
-      mutate(
-        Percentage = Count / sum(Count),
-        Label = paste0(round(Percentage * 100, 1), "%")
-      )
-    ggplot(df_summary, aes(x = "", y = Percentage, fill = as.factor(.data[[var_name]]))) +
-      geom_col(width = 1) +
-      coord_polar(theta = "y") +
-      geom_text(aes(label = Label), position = position_stack(vjust = 0.5), color = "white", size = 4) +
-      theme_void() +
-      labs(title = paste("Pie Chart of", var_name), fill = var_name)
+    is_categorical_like <- function(vec) {
+      is.character(vec) || is.factor(vec) || (is.numeric(vec) && length(unique(na.omit(vec))) < 15)
+    }
+    validate(need(is_categorical_like(df[[var_name]]), "Pie chart requires a categorical variable (e.g., text or numeric with few values)."))
+    
+    if (group_var != "None" && group_var %in% names(df)) {
+      df_summary <- df %>%
+        filter(!is.na(.data[[var_name]]), !is.na(.data[[group_var]])) %>%
+        group_by(.data[[group_var]], .data[[var_name]]) %>%
+        summarise(Count = n(), .groups = "drop_last") %>%
+        mutate(
+          Percentage = Count / sum(Count),
+          Label = paste0(round(Percentage * 100, 1), "%")
+        )
+      
+      ggplot(df_summary, aes(x = "", y = Percentage, fill = as.factor(.data[[var_name]]))) +
+        geom_col(width = 1) +
+        coord_polar(theta = "y") +
+        facet_wrap(vars(.data[[group_var]])) + 
+        geom_text(aes(label = Label), position = position_stack(vjust = 0.5), color = "white", size = 4) +
+        theme_void() +
+        labs(title = paste("Pie Chart of", var_name, "by", group_var), fill = var_name)
+    } else {
+      df_summary <- df %>%
+        filter(!is.na(.data[[var_name]])) %>%
+        count(.data[[var_name]], name = "Count") %>%
+        mutate(
+          Percentage = Count / sum(Count),
+          Label = paste0(round(Percentage * 100, 1), "%")
+        )
+      
+      ggplot(df_summary, aes(x = "", y = Percentage, fill = as.factor(.data[[var_name]]))) +
+        geom_col(width = 1) +
+        coord_polar(theta = "y") +
+        geom_text(aes(label = Label), position = position_stack(vjust = 0.5), color = "white", size = 4) +
+        theme_void() +
+        labs(title = paste("Pie Chart of", var_name), fill = var_name)
+    }
   }) %>% bindEvent(input$analyze_descriptive)
   
-  # --- Bar Chart ---
+  # --- Bar Chart (UPDATED VALIDATION) ---
   output$barchart_plot <- renderPlot({
     df <- data_r()
     req(df, input$descriptive_variable, input$descriptive_variable %in% names(df))
     var_name <- input$descriptive_variable
-    validate(need(is.character(df[[var_name]]) || is.factor(df[[var_name]]), "Bar chart is for categorical (text) variables only."))
+    group_var <- input$group_by_variable
     
-    df_summary <- df %>%
-      filter(!is.na(.data[[var_name]])) %>%
-      count(.data[[var_name]], name = "Frequency") %>%
-      mutate(Proportion = Frequency / sum(Frequency))
+    is_categorical_like <- function(vec) {
+      is.character(vec) || is.factor(vec) || (is.numeric(vec) && length(unique(na.omit(vec))) < 15)
+    }
+    validate(need(is_categorical_like(df[[var_name]]), "Bar chart requires a categorical variable (e.g., text or numeric with few values)."))
     
     y_axis_var <- if (input$barchart_yaxis_type == "proportion") "Proportion" else "Frequency"
     y_axis_label <- if (input$barchart_yaxis_type == "proportion") "Relative Frequency" else "Count"
     
-    gg <- ggplot(df_summary, aes(x = as.factor(.data[[var_name]]), y = .data[[y_axis_var]])) +
-      geom_col(fill = "cornflowerblue") +
-      labs(title = paste("Bar Chart of", var_name), x = var_name, y = y_axis_label)
+    if (group_var != "None" && group_var %in% names(df)) {
+      df_summary <- df %>%
+        filter(!is.na(.data[[var_name]]), !is.na(.data[[group_var]])) %>%
+        group_by(.data[[group_var]], .data[[var_name]]) %>%
+        summarise(Frequency = n(), .groups = "drop_last") %>%
+        mutate(Proportion = Frequency / sum(Frequency))
+      
+      gg <- ggplot(df_summary, aes(x = as.factor(.data[[var_name]]), y = .data[[y_axis_var]], fill = as.factor(.data[[var_name]]))) +
+        geom_col() +
+        facet_wrap(vars(.data[[group_var]]), scales = "free_y") + 
+        labs(title = paste("Bar Chart of", var_name, "by", group_var), x = var_name, y = y_axis_label, fill = var_name) +
+        theme(legend.position = "none") 
+      
+    } else {
+      df_summary <- df %>%
+        filter(!is.na(.data[[var_name]])) %>%
+        count(.data[[var_name]], name = "Frequency") %>%
+        mutate(Proportion = Frequency / sum(Frequency))
+      
+      gg <- ggplot(df_summary, aes(x = as.factor(.data[[var_name]]), y = .data[[y_axis_var]])) +
+        geom_col(fill = "cornflowerblue") +
+        labs(title = paste("Bar Chart of", var_name), x = var_name, y = y_axis_label)
+    }
     
     if (input$barchart_yaxis_type == "proportion") {
       gg <- gg + scale_y_continuous(labels = scales::percent)
     }
     gg
   }) %>% bindEvent(input$analyze_descriptive)
+  
+  # --- DOWNLOAD HANDLER ---
+  output$download_descriptive_report <- downloadHandler(
+    filename = function() {
+      paste("OpenStats_Report_", Sys.Date(), ".docx", sep = "")
+    },
+    content = function(file) {
+      id <- showNotification("Generating report...", duration = NULL, closeButton = FALSE)
+      on.exit(removeNotification(id), add = TRUE)
+      
+      tempReport <- file.path(tempdir(), "report.Rmd")
+      file.copy("report.Rmd", tempReport, overwrite = TRUE)
+      
+      params <- list(
+        dataset = data_r(),
+        var_name = input$descriptive_variable,
+        group_var = input$group_by_variable,
+        plot_hist = desc_results$hist,
+        plot_box = desc_results$box,
+        plot_density = desc_results$density,
+        summary_table = desc_results$summary
+      )
+      
+      rmarkdown::render(tempReport, output_file = file,
+                        params = params,
+                        envir = new.env(parent = globalenv())
+      )
+    }
+  )
   
   # --- END OPTIMIZED Descriptive Statistics Logic ---
   
