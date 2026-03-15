@@ -1,0 +1,3 @@
+set_github_action	set_github_action
+set_gitlab_ci	set_gitlab_ci
+shiny2docker	shiny2docker

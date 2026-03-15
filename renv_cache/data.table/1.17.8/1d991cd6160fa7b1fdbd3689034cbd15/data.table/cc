@@ -1,0 +1,2 @@
+CC=/osxcross/bin/oa64-clang -arch arm64 -mmacosx-version-min=10.13
+CFLAGS=-falign-functions=64 -Wall -g -O2

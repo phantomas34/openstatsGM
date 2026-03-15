@@ -1,0 +1,4 @@
+set_github_action       Configure GitHub Action pipeline for Docker
+                        builds
+set_gitlab_ci           Configure GitLab CI pipeline for Docker builds
+shiny2docker            shiny2docker
