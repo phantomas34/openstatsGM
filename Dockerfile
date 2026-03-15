@@ -22,11 +22,17 @@ RUN echo 'options(timeout=3600, download.file.method="wget", download.file.extra
 RUN mkdir -p /srv/shiny-server/openstats
 WORKDIR /srv/shiny-server/openstats
 
+<<<<<<< HEAD
 RUN install2.r --error --skipinstalled -n 1 -r "https://cloud.r-project.org" \
     lazyeval
+=======
+# 4. Install correct renv version (The Fix)
+RUN R -e "install.packages('remotes', repos='https://cloud.r-project.org'); remotes::install_version('renv', '1.1.5', repos='https://cloud.r-project.org')"
+>>>>>>> 50dcdee026dd0105905ef1e9425b60ea50c78ad7
 
 RUN R -e "options(timeout=3600, download.file.method='wget', download.file.extra='--tries=20 --waitretry=5 --retry-connrefused'); for (i in 1:8) { message(sprintf('S7 install attempt %d/8', i)); try(suppressWarnings(install.packages('S7', repos='https://cloud.r-project.org')), silent=TRUE); if (requireNamespace('S7', quietly=TRUE)) quit(save='no', status=0); Sys.sleep(8) }; stop('Failed to install S7 after retries')"
 
+<<<<<<< HEAD
 RUN install2.r --error --skipinstalled -n 1 -r "https://cloud.r-project.org" \
     ggplot2 \
     dplyr \
@@ -55,11 +61,20 @@ RUN R -e "options(timeout=3600, download.file.method='wget', download.file.extra
 RUN install2.r --error --skipinstalled -n 1 -r "https://cloud.r-project.org" \
     psych \
     car
+=======
+# 6. Restore Packages
+RUN R -e "options(timeout=300, repos = c(CRAN = 'https://packagemanager.posit.co/cran/__linux__/jammy/latest')); renv::restore(prompt = FALSE)"
+>>>>>>> 50dcdee026dd0105905ef1e9425b60ea50c78ad7
 
 COPY . /srv/shiny-server/openstats/
 
 RUN rm -f .Rprofile renv.lock
 RUN rm -rf renv/
 
+<<<<<<< HEAD
 EXPOSE 3838
 CMD ["R", "-e", "shiny::runApp('/srv/shiny-server/openstats', host = '0.0.0.0', port = 3838)"]
+=======
+# 9. Run the Application
+CMD ["R", "-e", "shiny::runApp('/srv/shiny-server/openstats', host = '0.0.0.0', port = 3838)"]
+>>>>>>> 50dcdee026dd0105905ef1e9425b60ea50c78ad7
