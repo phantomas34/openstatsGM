@@ -1,8 +1,8 @@
+# 1. Base Image
 FROM --platform=linux/amd64 rocker/shiny-verse:4.4.2
 
+# 2. System Libraries (Provides necessary shared objects for pre-compiled binaries)
 RUN apt-get update && apt-get install -y \
-    wget \
-    ca-certificates \
     libssl-dev \
     libcurl4-openssl-dev \
     libxml2-dev \
@@ -14,67 +14,35 @@ RUN apt-get update && apt-get install -y \
     libpng-dev \
     libtiff5-dev \
     libjpeg-dev \
-    && update-ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-RUN echo 'options(timeout=3600, download.file.method="wget", download.file.extra="--tries=20 --waitretry=5 --retry-connrefused")' >> /usr/local/lib/R/etc/Rprofile.site
-
+# 3. Setup App Directory
 RUN mkdir -p /srv/shiny-server/openstats
 WORKDIR /srv/shiny-server/openstats
 
-<<<<<<< HEAD
-RUN install2.r --error --skipinstalled -n 1 -r "https://cloud.r-project.org" \
-    lazyeval
-=======
-# 4. Install correct renv version (The Fix)
-RUN R -e "install.packages('remotes', repos='https://cloud.r-project.org'); remotes::install_version('renv', '1.1.5', repos='https://cloud.r-project.org')"
->>>>>>> 50dcdee026dd0105905ef1e9425b60ea50c78ad7
-
-RUN R -e "options(timeout=3600, download.file.method='wget', download.file.extra='--tries=20 --waitretry=5 --retry-connrefused'); for (i in 1:8) { message(sprintf('S7 install attempt %d/8', i)); try(suppressWarnings(install.packages('S7', repos='https://cloud.r-project.org')), silent=TRUE); if (requireNamespace('S7', quietly=TRUE)) quit(save='no', status=0); Sys.sleep(8) }; stop('Failed to install S7 after retries')"
-
-<<<<<<< HEAD
-RUN install2.r --error --skipinstalled -n 1 -r "https://cloud.r-project.org" \
-    ggplot2 \
-    dplyr \
-    tidyr \
-    scales \
-    magrittr \
-    rlang \
-    rsconnect
-
-RUN R -e "options(timeout=3600, download.file.method='wget', download.file.extra='--tries=20 --waitretry=5 --retry-connrefused'); for (i in 1:8) { message(sprintf('crosstalk install attempt %d/8', i)); try(suppressWarnings(install.packages('crosstalk', repos='https://cloud.r-project.org')), silent=TRUE); if (requireNamespace('crosstalk', quietly=TRUE)) quit(save='no', status=0); Sys.sleep(8) }; stop('Failed to install crosstalk after retries')"
-
-RUN R -e "options(timeout=3600, download.file.method='wget', download.file.extra='--tries=20 --waitretry=5 --retry-connrefused'); for (i in 1:8) { message(sprintf('DT install attempt %d/8', i)); try(suppressWarnings(install.packages('DT', repos='https://cloud.r-project.org')), silent=TRUE); if (requireNamespace('DT', quietly=TRUE)) quit(save='no', status=0); Sys.sleep(8) }; stop('Failed to install DT after retries')"
-
-RUN install2.r --error --skipinstalled -n 1 -r "https://cloud.r-project.org" \
+# 4. Install Packages (The "Binary Speed" Method)
+# Pointing to the '__linux__/noble/latest' repo grabs pre-compiled binaries.
+# This prevents your Mac emulator from having to compile C++ code and crashing.
+RUN install2.r --error --skipinstalled -n 1 -r "https://packagemanager.posit.co/cran/__linux__/noble/latest" \
     bslib \
     thematic \
+    DT \
     rhandsontable \
-    readxl \
-    bsicons \
-    shinyjs
-
-RUN R -e "options(timeout=3600, download.file.method='wget', download.file.extra='--tries=20 --waitretry=5 --retry-connrefused'); for (i in 1:8) { message(sprintf('shinyWidgets install attempt %d/8', i)); try(suppressWarnings(install.packages('shinyWidgets', repos='https://cloud.r-project.org')), silent=TRUE); if (requireNamespace('shinyWidgets', quietly=TRUE)) quit(save='no', status=0); Sys.sleep(8) }; stop('Failed to install shinyWidgets after retries')"
-
-RUN R -e "options(timeout=3600, download.file.method='wget', download.file.extra='--tries=20 --waitretry=5 --retry-connrefused'); for (i in 1:8) { message(sprintf('shinycssloaders install attempt %d/8', i)); try(suppressWarnings(install.packages('shinycssloaders', repos='https://cloud.r-project.org')), silent=TRUE); if (requireNamespace('shinycssloaders', quietly=TRUE)) quit(save='no', status=0); Sys.sleep(8) }; stop('Failed to install shinycssloaders after retries')"
-
-RUN install2.r --error --skipinstalled -n 1 -r "https://cloud.r-project.org" \
+    car \
     psych \
-    car
-=======
-# 6. Restore Packages
-RUN R -e "options(timeout=300, repos = c(CRAN = 'https://packagemanager.posit.co/cran/__linux__/jammy/latest')); renv::restore(prompt = FALSE)"
->>>>>>> 50dcdee026dd0105905ef1e9425b60ea50c78ad7
+    readxl \
+    shinyWidgets \
+    bsicons \
+    shinyjs \
+    shinycssloaders
 
+# 5. Copy App Files 
 COPY . /srv/shiny-server/openstats/
 
+# 6. Neutralize local environments
 RUN rm -f .Rprofile renv.lock
 RUN rm -rf renv/
 
-<<<<<<< HEAD
+# 7. Expose port and Run
 EXPOSE 3838
 CMD ["R", "-e", "shiny::runApp('/srv/shiny-server/openstats', host = '0.0.0.0', port = 3838)"]
-=======
-# 9. Run the Application
-CMD ["R", "-e", "shiny::runApp('/srv/shiny-server/openstats', host = '0.0.0.0', port = 3838)"]
->>>>>>> 50dcdee026dd0105905ef1e9425b60ea50c78ad7
