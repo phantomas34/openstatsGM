@@ -31,13 +31,17 @@ server <- function(input, output, session) {
     file_ext <- tools::file_ext(input$file_upload$name)
     df <- NULL
     tryCatch({
+      # Define a robust list of common "missing data" symbols students might type
+      missing_symbols <- c("", "NA", "N/A", "n/a", "*", ".", "-", "Missing")
+      
       if (file_ext == "csv") {
-        df <- read.csv(input$file_upload$datapath, stringsAsFactors = FALSE, na.strings=c("","NA"))
+        df <- read.csv(input$file_upload$datapath, stringsAsFactors = FALSE, na.strings = missing_symbols)
       } else if (file_ext == "xlsx") {
-        df <- readxl::read_excel(input$file_upload$datapath, na=c("","NA"))
+        df <- readxl::read_excel(input$file_upload$datapath, na = missing_symbols)
       } else {
         showNotification("Unsupported file type. Please upload a .csv or .xlsx file.", type = "error")
       }
+      
       if (!is.null(df)) {
         data_r(df)
         showNotification("Dataset uploaded successfully!", type = "message")
@@ -363,16 +367,19 @@ server <- function(input, output, session) {
         final_summary_data <- as.data.frame.matrix(addmargins(tbl))
         datatable(final_summary_data, options = list(dom = 't'), rownames = TRUE, caption = 'Two-Way Contingency Table (Counts)')
       } else if (is.numeric(df[[var_name]]) && group_is_cat_like) {
+        
+        # FIXED: Grouped Numeric Summary (Added N_Missing)
         final_summary_data <- df %>%
           group_by(.data[[group_var]]) %>%
           summarise(
-            N = sum(!is.na(.data[[var_name]])),
+            N_Valid = sum(!is.na(.data[[var_name]])),
+            N_Missing = sum(is.na(.data[[var_name]])),
             Mean = round(mean(.data[[var_name]], na.rm = TRUE), 2),
             Median = round(median(.data[[var_name]], na.rm = TRUE), 2),
             SD = round(sd(.data[[var_name]], na.rm = TRUE), 2),
             Min = round(min(.data[[var_name]], na.rm = TRUE), 2),
-            Q1 = round(quantile(.data[[var_name]], 0.25, na.rm = TRUE), 2),
-            Q3 = round(quantile(.data[[var_name]], 0.75, na.rm = TRUE), 2),
+            Q1 = round(as.numeric(quantile(.data[[var_name]], 0.25, na.rm = TRUE)), 2),
+            Q3 = round(as.numeric(quantile(.data[[var_name]], 0.75, na.rm = TRUE)), 2),
             Max = round(max(.data[[var_name]], na.rm = TRUE), 2)
           )
         datatable(final_summary_data, options = list(dom = 't'), rownames = FALSE, caption = 'Descriptive Statistics (Grouped)')
@@ -387,16 +394,19 @@ server <- function(input, output, session) {
           mutate(Relative_Frequency = scales::percent(Frequency / sum(Frequency), accuracy = 0.1))
         datatable(final_summary_data, options = list(dom = 't'), rownames = FALSE, caption = 'Frequency Distribution Table')
       } else {
+        
+        # FIXED: Ungrouped Numeric Summary (Exactly 9 Labels and 9 Values)
         final_summary_data <- data.frame(
-          Statistic = c("N", "Mean", "Median", "SD", "Min", "Q1", "Q3", "Max"),
+          Statistic = c("Valid (N)", "Missing (N)", "Mean", "Median", "SD", "Min", "Q1", "Q3", "Max"),
           Value = c(
             sum(!is.na(df[[var_name]])),
+            sum(is.na(df[[var_name]])),
             round(mean(df[[var_name]], na.rm = TRUE), 2),
             round(median(df[[var_name]], na.rm = TRUE), 2),
             round(sd(df[[var_name]], na.rm = TRUE), 2),
             round(min(df[[var_name]], na.rm = TRUE), 2),
-            round(quantile(df[[var_name]], 0.25, na.rm = TRUE), 2),
-            round(quantile(df[[var_name]], 0.75, na.rm = TRUE), 2),
+            round(as.numeric(quantile(df[[var_name]], 0.25, na.rm = TRUE)), 2),
+            round(as.numeric(quantile(df[[var_name]], 0.75, na.rm = TRUE)), 2),
             round(max(df[[var_name]], na.rm = TRUE), 2)
           )
         )
