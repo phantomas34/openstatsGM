@@ -801,6 +801,7 @@ server <- function(input, output, session) {
     })
   })
   
+  # --- START: UPGRADED Two-Proportion Test Logic (With Both SEs) ---
   observeEvent(input$run_two_prop_test, {
     df <- data_r()
     req(df, input$prop_var, input$two_prop_group_var, input$two_prop_group1, input$two_prop_group2, input$two_prop_success)
@@ -846,18 +847,32 @@ server <- function(input, output, session) {
       return(NULL)
     }
     
+    # 1. Calculate Individual Proportions and SEs
     p1 <- x1 / n1
     p2 <- x2 / n2
     se1 <- sqrt(p1 * (1 - p1) / n1)
     se2 <- sqrt(p2 * (1 - p2) / n2)
     
+    # 2. Calculate UNPOOLED SE (Your Professor's Formula for Confidence Intervals)
+    # Using s^2 = p(1-p)
+    se_unpooled <- sqrt( ((p1 * (1 - p1)) / n1) + ((p2 * (1 - p2)) / n2) )
+    
+    # 3. Calculate POOLED SE (For Hypothesis Test Z-statistic)
+    p_pool <- (x1 + x2) / (n1 + n2)
+    se_pool <- sqrt(p_pool * (1 - p_pool) * ((1 / n1) + (1 / n2)))
+    
     output$two_prop_test_result <- renderPrint({
       cat("Two-Proportion Test\n\n")
-      cat("Group 1:", group1, "| Successes:", x1, "/", n1, "| SE:", round(se1, 4), "\n")
-      cat("Group 2:", group2, "| Successes:", x2, "/", n2, "| SE:", round(se2, 4), "\n\n")
+      cat("Group 1:", group1, "| Successes:", x1, "/", n1, "| p\U0302:", round(p1, 4), "| SE:", round(se1, 4), "\n")
+      cat("Group 2:", group2, "| Successes:", x2, "/", n2, "| p\U0302:", round(p2, 4), "| SE:", round(se2, 4), "\n")
+      cat("------------------------------------------------------------------\n")
+      cat("Unpooled Standard Error (For CI):      ", round(se_unpooled, 4), "\n")
+      cat("Pooled Standard Error (For Test Stat): ", round(se_pool, 4), "\n")
+      cat("Pooled Proportion (p\U0302):               ", round(p_pool, 4), "\n\n")
       print(prop.test(x = c(x1, x2), n = c(n1, n2), alternative = input$two_prop_alternative))
     })
   })
+  # --- END OF REPLACEMENT ---
   
   observeEvent(input$run_ht, {
     req(data_r(), input$ht_variable)
