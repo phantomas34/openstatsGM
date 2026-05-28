@@ -6,6 +6,19 @@ dark_theme <- bs_theme(version = 5, bootswatch = "darkly")
 
 ui <- page_sidebar(
   useShinyjs(),
+  use_tota11y(),
+  
+  # --- START: Accessibility Fixes for Shiny Defaults ---
+  tags$head(
+    tags$script(HTML('
+      $(document).ready(function() {
+        // Fix the fileInput missing label error
+        $("input[placeholder=\'No file selected\']").attr("aria-label", "Selected file name");
+      });
+    '))
+  ),
+  # --- END: Accessibility Fixes ---
+  
   title = "OpenStat Web App",
   
   sidebar = sidebar(
@@ -217,6 +230,7 @@ ui <- page_sidebar(
                    )
   ),
   
+  # --- START: Probability Panel (WCAG Fix) ---
   conditionalPanel("input.main_nav == 'Probability'",
                    h2("Probability Distributions and Calculations"),
                    navset_card_tab(
@@ -267,10 +281,10 @@ ui <- page_sidebar(
                                  ),
                                  card(
                                    card_header("Results"),
-                                   h4("Calculated Value:"),
+                                   h3(class = "h4", "Calculated Value:"),
                                    (verbatimTextOutput("normal_result") %>% withSpinner()),
                                    hr(),
-                                   h4("Visual Representation:"),
+                                   h3(class = "h4", "Visual Representation:"),
                                    plotOutput("normal_plot") %>% withSpinner()
                                  )
                                )
@@ -283,16 +297,16 @@ ui <- page_sidebar(
                                    numericInput("binom_size", "Number of Trials (n)", value = 10, min = 1, step = 1),
                                    numericInput("binom_prob", "Probability of Success (p)", value = 0.5, min = 0, max = 1, step = 0.01),
                                    hr(),
-                                   h4("Distribution Summary"),
+                                   h3(class = "h4", "Distribution Summary"),
                                    (verbatimTextOutput("binom_summary_stats") %>% withSpinner()),
                                    hr(),
-                                   h4("Calculate P(X) given x"),
+                                   h3(class = "h4", "Calculate P(X) given x"),
                                    numericInput("binom_k", "Number of Successes (x)", value = 5, min = 0, step = 1),
                                    selectInput("binom_type", "Probability Type", choices = c("P(X = x)", "P(X <= x)", "P(X >= x)")),
                                    actionButton("calc_binom_prob", "Calculate Probability"),
                                    (verbatimTextOutput("binom_prob_output") %>% withSpinner()),
                                    hr(),
-                                   h4("Find x for a given Cumulative Probability P(X ≤ x)"),
+                                   h3(class = "h4", "Find x for a given Cumulative Probability P(X ≤ x)"),
                                    numericInput("binom_p_for_k", "Cumulative Probability (e.g., 0.95):", value = 0.95, min = 0, max = 1, step = 0.01),
                                    actionButton("solve_binom_k", "Solve for x"),
                                    (verbatimTextOutput("solve_binom_k_output") %>% withSpinner())
@@ -310,10 +324,10 @@ ui <- page_sidebar(
                                    card_header("Poisson Distribution Parameters"),
                                    numericInput("pois_lambda", "Lambda (λ - average rate)", value = 3, min = 0.01),
                                    hr(),
-                                   h4("Distribution Summary"),
+                                   h3(class = "h4", "Distribution Summary"),
                                    (verbatimTextOutput("pois_summary_stats") %>% withSpinner()),
                                    hr(),
-                                   h4("Calculate P(X = k) or P(X <= k)"),
+                                   h3(class = "h4", "Calculate P(X = k) or P(X <= k)"),
                                    numericInput("pois_k", "Number of Events (k)", value = 2, min = 0, step = 1),
                                    selectInput("pois_type", "Probability Type", choices = c("P(X = k)", "P(X <= k)", "P(X >= k)")),
                                    actionButton("calc_pois_prob", "Calculate Poisson Probability"),
