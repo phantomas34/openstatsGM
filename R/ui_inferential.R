@@ -67,6 +67,7 @@ inferential_tab_ui <- accordion(
         "Two-Way Table", 
         selectInput("chisq_table_type", "Display:",
                     choices = c("Observed Counts" = "counts",
+                                "Expected Counts" = "expected",
                                 "Row Percentages" = "row_perc",
                                 "Column Percentages" = "col_perc",
                                 "Total Percentages" = "total_perc")),

@@ -908,6 +908,10 @@ server <- function(input, output, session) {
       if (table_type == "counts") {
         cat("Two-Way Table (Observed Counts):\n\n")
         print(addmargins(contingency_table))
+      } else if (table_type == "expected") {                          
+        cat("Two-Way Table (Expected Counts):\n\n")                    
+        print(round(suppressWarnings(chisq.test(contingency_table))$expected, 2))
+        print(addmargins(contingency_table))
       } else {
         cat("Two-Way Table (Row Proportions):\n\n")
         print(round(prop.table(contingency_table, margin = 1), 4))
